@@ -192,7 +192,60 @@ Memory after training end: {
 
 LoRA with rank 128, batch size 1, gradient checkpointing, optimizer adamw, `49x512x768` resolution, **with precomputation**:
 
-TODO
+```
+Memory after precomputing conditions: {
+    "memory_allocated": 8.88,
+    "memory_reserved": 8.895,
+    "max_memory_allocated": 8.897,
+    "max_memory_reserved": 8.92
+}
+Memory after precomputing latents: {
+    "memory_allocated": 9.684,
+    "memory_reserved": 9.807,
+    "max_memory_allocated": 11.155,
+    "max_memory_reserved": 11.613
+}
+Memory before training start: {
+    "memory_allocated": 3.809,
+    "memory_reserved": 10.01,
+    "max_memory_allocated": 9.684,
+    "max_memory_reserved": 10.01
+}
+Training configuration: {
+    "trainable parameters": 117440512,
+    "total samples": 1,
+    "train epochs": 10,
+    "train steps": 10,
+    "batches per device": 1,
+    "total batches observed per epoch": 1,
+    "train batch size": 1,
+    "gradient accumulation steps": 1
+}
+Memory after epoch 1: {
+    "memory_allocated": 4.26,
+    "memory_reserved": 10.916,
+    "max_memory_allocated": 9.684,
+    "max_memory_reserved": 10.916
+}
+Memory before validation start: {
+    "memory_allocated": 4.26,
+    "memory_reserved": 10.916,
+    "max_memory_allocated": 9.684,
+    "max_memory_reserved": 10.916
+}
+Memory after validation end: {
+    "memory_allocated": 13.924,
+    "memory_reserved": 14.209,
+    "max_memory_allocated": 15.083,
+    "max_memory_reserved": 17.262
+}
+Memory after training end: {
+    "memory_allocated": 4.26,
+    "memory_reserved": 4.602,
+    "max_memory_allocated": 13.923,
+    "max_memory_reserved": 14.314
+}
+```
 
 </details>
 
@@ -326,6 +379,11 @@ export_to_video(output, "output.mp4", fps=15)
 </details>
 
 If you would like to use a custom dataset, refer to the dataset preparation guide [here](./assets/dataset.md).
+
+> [!NOTE]
+> To lower memory requirements:
+> - Pass `--precompute_conditions` when launching training.
+> - Do not perform validation/testing. This saves a significant amount of memory, which can be used to focus solely on training if you're on smaller VRAM GPUs.
 
 ## Memory requirements
 

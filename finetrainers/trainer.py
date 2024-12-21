@@ -224,6 +224,16 @@ class Trainer:
         self._set_components(condition_components)
         self._move_components_to_device()
 
+        # TODO(aryan): refactor later. for now only lora is supported
+        components_to_disable_grads = [
+            self.text_encoder,
+            self.text_encoder_2,
+            self.text_encoder_3,
+        ]
+        for component in components_to_disable_grads:
+            if component is not None:
+                component.requires_grad_(False)
+
         if self.args.caption_dropout_p > 0 and self.args.caption_dropout_technique == "empty":
             logger.warning(
                 "Caption dropout is not supported with precomputation yet. This will be supported in the future."
@@ -274,6 +284,12 @@ class Trainer:
         latent_components = self.model_config["load_latent_models"](**self._get_load_components_kwargs())
         self._set_components(latent_components)
         self._move_components_to_device()
+
+        # TODO(aryan): refactor later
+        components_to_disable_grads = [self.vae]
+        for component in components_to_disable_grads:
+            if component is not None:
+                component.requires_grad_(False)
 
         if self.vae is not None:
             if self.args.enable_slicing:
