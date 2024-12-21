@@ -319,7 +319,7 @@ class Trainer:
                 generator=self.state.generator,
                 precompute=True,
             )
-            filename = latents_dir / f"latents-{i}-{index}.pt"
+            filename = latents_dir / f"latents-{self.state.accelerator.process_index}-{index}.pt"
             torch.save(latent_conditions, filename.as_posix())
             index += 1
             progress_bar.update(1)

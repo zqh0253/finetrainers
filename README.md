@@ -376,6 +376,111 @@ output = pipe(
 export_to_video(output, "output.mp4", fps=15)
 ```
 
+### Memory Usage
+
+LoRA with rank 128, batch size 1, gradient checkpointing, optimizer adamw, `49x512x768` resolutions, **without precomputation**:
+
+```
+Memory before training start: {
+    "memory_allocated": 38.889,
+    "memory_reserved": 39.02,
+    "max_memory_allocated": 38.889,
+    "max_memory_reserved": 39.02
+}
+Training configuration: {
+    "trainable parameters": 163577856,
+    "total samples": 69,
+    "train epochs": 1,
+    "train steps": 10,
+    "batches per device": 1,
+    "total batches observed per epoch": 69,
+    "train batch size": 1,
+    "gradient accumulation steps": 1
+}
+Memory before validation start: {
+    "memory_allocated": 39.747,
+    "memory_reserved": 56.266,
+    "max_memory_allocated": 51.867,
+    "max_memory_reserved": 56.266
+}
+Memory after validation end: {
+    "memory_allocated": 39.748,
+    "memory_reserved": 41.445,
+    "max_memory_allocated": 51.867,
+    "max_memory_reserved": 58.385
+}
+Memory after epoch 1: {
+    "memory_allocated": 39.748,
+    "memory_reserved": 40.91,
+    "max_memory_allocated": 39.748,
+    "max_memory_reserved": 40.91
+}
+Memory after training end: {
+    "memory_allocated": 25.288,
+    "memory_reserved": 27.783,
+    "max_memory_allocated": 39.748,
+    "max_memory_reserved": 40.91
+}
+```
+
+LoRA with rank 128, batch size 1, gradient checkpointing, optimizer adamw, `49x512x768` resolutions, **with precomputation**:
+
+```
+Memory after precomputing conditions: {
+    "memory_allocated": 14.232,
+    "memory_reserved": 14.336,
+    "max_memory_allocated": 14.395,
+    "max_memory_reserved": 14.461
+}
+Memory after precomputing latents: {
+    "memory_allocated": 14.717,
+    "memory_reserved": 14.762,
+    "max_memory_allocated": 16.759,
+    "max_memory_reserved": 17.244
+}
+Memory before training start: {
+    "memory_allocated": 24.195,
+    "memory_reserved": 26.039,
+    "max_memory_allocated": 24.195,
+    "max_memory_reserved": 26.039
+}
+Training configuration: {
+    "trainable parameters": 163577856,
+    "total samples": 1,
+    "train epochs": 10,
+    "train steps": 10,
+    "batches per device": 1,
+    "total batches observed per epoch": 1,
+    "train batch size": 1,
+    "gradient accumulation steps": 1
+}
+Memory after epoch 1: {
+    "memory_allocated": 24.83,
+    "memory_reserved": 42.387,
+    "max_memory_allocated": 36.357,
+    "max_memory_reserved": 42.387
+}
+Memory before validation start: {
+    "memory_allocated": 24.842,
+    "memory_reserved": 42.387,
+    "max_memory_allocated": 36.977,
+    "max_memory_reserved": 42.387
+}
+
+Memory after validation end: {
+    "memory_allocated": 39.558,
+    "memory_reserved": 41.039,
+    "max_memory_allocated": 43.226,
+    "max_memory_reserved": 46.947
+}
+Memory after training end: {
+    "memory_allocated": 24.842,
+    "memory_reserved": 26.82,
+    "max_memory_allocated": 39.558,
+    "max_memory_reserved": 41.039
+}
+```
+
 </details>
 
 If you would like to use a custom dataset, refer to the dataset preparation guide [here](./assets/dataset.md).
