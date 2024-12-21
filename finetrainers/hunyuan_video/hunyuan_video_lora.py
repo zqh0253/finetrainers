@@ -25,10 +25,21 @@ def load_condition_models(
     **kwargs,
 ) -> Dict[str, nn.Module]:
     tokenizer = AutoTokenizer.from_pretrained(model_id, subfolder="tokenizer", revision=revision, cache_dir=cache_dir)
-    text_encoder = LlamaModel.from_pretrained(model_id, subfolder="text_encoder", torch_dtype=text_encoder_dtype, revision=revision, cache_dir=cache_dir)
-    tokenizer_2 = CLIPTokenizer.from_pretrained(model_id, subfolder="tokenizer_2", revision=revision, cache_dir=cache_dir)
-    text_encoder_2 = CLIPTextModel.from_pretrained(model_id, subfolder="text_encoder_2", torch_dtype=text_encoder_2_dtype, revision=revision, cache_dir=cache_dir)
-    return {"tokenizer": tokenizer, "text_encoder": text_encoder, "tokenizer_2": tokenizer_2, "text_encoder_2": text_encoder_2}
+    text_encoder = LlamaModel.from_pretrained(
+        model_id, subfolder="text_encoder", torch_dtype=text_encoder_dtype, revision=revision, cache_dir=cache_dir
+    )
+    tokenizer_2 = CLIPTokenizer.from_pretrained(
+        model_id, subfolder="tokenizer_2", revision=revision, cache_dir=cache_dir
+    )
+    text_encoder_2 = CLIPTextModel.from_pretrained(
+        model_id, subfolder="text_encoder_2", torch_dtype=text_encoder_2_dtype, revision=revision, cache_dir=cache_dir
+    )
+    return {
+        "tokenizer": tokenizer,
+        "text_encoder": text_encoder,
+        "tokenizer_2": tokenizer_2,
+        "text_encoder_2": text_encoder_2,
+    }
 
 
 def load_latent_models(
@@ -38,7 +49,9 @@ def load_latent_models(
     cache_dir: Optional[str] = None,
     **kwargs,
 ) -> Dict[str, nn.Module]:
-    vae = AutoencoderKLHunyuanVideo.from_pretrained(model_id, subfolder="vae", torch_dtype=vae_dtype, revision=revision, cache_dir=cache_dir)
+    vae = AutoencoderKLHunyuanVideo.from_pretrained(
+        model_id, subfolder="vae", torch_dtype=vae_dtype, revision=revision, cache_dir=cache_dir
+    )
     return {"vae": vae}
 
 
