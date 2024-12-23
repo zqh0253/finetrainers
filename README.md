@@ -386,6 +386,7 @@ If you would like to use a custom dataset, refer to the dataset preparation guid
 > [!NOTE]
 > To lower memory requirements:
 > - Pass `--precompute_conditions` when launching training.
+> - Pass `--gradient_checkpointing` when launching training.
 > - Do not perform validation/testing. This saves a significant amount of memory, which can be used to focus solely on training if you're on smaller VRAM GPUs.
 
 ## Memory requirements
