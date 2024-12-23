@@ -143,6 +143,60 @@ video = pipe("<my-awesome-prompt>").frames[0]
 export_to_video(video, "output.mp4", fps=8)
 ```
 
+### Memory Usage
+
+LoRA with rank 128, batch size 1, gradient checkpointing, optimizer adamw, `49x512x768` resolution, **without precomputation**:
+
+```
+Training configuration: {
+    "trainable parameters": 117440512,
+    "total samples": 69,
+    "train epochs": 1,
+    "train steps": 10,
+    "batches per device": 1,
+    "total batches observed per epoch": 69,
+    "train batch size": 1,
+    "gradient accumulation steps": 1
+}
+```
+
+| stage                   | memory_allocated | max_memory_reserved |
+|:-----------------------:|:----------------:|:-------------------:|
+| before training start   | 13.486           | 13.879              |
+| before validation start | 14.146           | 17.623              |
+| after validation end    | 14.146           | 17.623              |
+| after epoch 1           | 14.146           | 17.623              |
+| after training end      | 4.461            | 17.623              |
+
+Note: requires about `18` GB of VRAM without precomputation.
+
+LoRA with rank 128, batch size 1, gradient checkpointing, optimizer adamw, `49x512x768` resolution, **with precomputation**:
+
+```
+Training configuration: {
+    "trainable parameters": 117440512,
+    "total samples": 1,
+    "train epochs": 10,
+    "train steps": 10,
+    "batches per device": 1,
+    "total batches observed per epoch": 1,
+    "train batch size": 1,
+    "gradient accumulation steps": 1
+}
+```
+
+| stage                         | memory_allocated | max_memory_reserved |
+|:-----------------------------:|:----------------:|:-------------------:|
+| after precomputing conditions | 8.88             | 8.920               |
+| after precomputing latents    | 9.684            | 11.613              |
+| before training start         | 3.809            | 10.010              |
+| after epoch 1                 | 4.26             | 10.916              |
+| before validation start       | 4.26             | 10.916              |
+| after validation end          | 13.924           | 17.262              |
+| after training end            | 4.26             | 14.314              |
+
+Note: requires about `17.5` GB of VRAM with precomputation. If validation is not performed, the memory usage is reduced to `11` GB.
+
 </details>
 
 <details>
@@ -169,8 +223,7 @@ OUTPUT_DIR="/path/to/models/hunyuan-video/hunyuan-video-loras/hunyuan-video_caki
 
 # Model arguments
 model_cmd="--model_name hunyuan_video \
-  --pretrained_model_name_or_path tencent/HunyuanVideo
-  --revision refs/pr/18"
+  --pretrained_model_name_or_path hunyuanvideo-community/HunyuanVideo"
 
 # Dataset arguments
 dataset_cmd="--data_root $DATA_ROOT \
@@ -252,7 +305,7 @@ import torch
 from diffusers import HunyuanVideoPipeline, HunyuanVideoTransformer3DModel
 from diffusers.utils import export_to_video
 
-model_id = "tencent/HunyuanVideo"
+model_id = "hunyuanvideo-community/HunyuanVideo"
 transformer = HunyuanVideoTransformer3DModel.from_pretrained(
     model_id, subfolder="transformer", torch_dtype=torch.bfloat16
 )
@@ -272,9 +325,69 @@ output = pipe(
 export_to_video(output, "output.mp4", fps=15)
 ```
 
+### Memory Usage
+
+LoRA with rank 128, batch size 1, gradient checkpointing, optimizer adamw, `49x512x768` resolutions, **without precomputation**:
+
+```
+Training configuration: {
+    "trainable parameters": 163577856,
+    "total samples": 69,
+    "train epochs": 1,
+    "train steps": 10,
+    "batches per device": 1,
+    "total batches observed per epoch": 69,
+    "train batch size": 1,
+    "gradient accumulation steps": 1
+}
+```
+
+| stage                   | memory_allocated | max_memory_reserved |
+|:-----------------------:|:----------------:|:-------------------:|
+| before training start   | 38.889           | 39.020              |
+| before validation start | 39.747           | 56.266              |
+| after validation end    | 39.748           | 58.385              |
+| after epoch 1           | 39.748           | 40.910              |
+| after training end      | 25.288           | 40.910              |
+
+Note: requires about `59` GB of VRAM without precomputation.
+
+LoRA with rank 128, batch size 1, gradient checkpointing, optimizer adamw, `49x512x768` resolutions, **with precomputation**:
+
+```
+Training configuration: {
+    "trainable parameters": 163577856,
+    "total samples": 1,
+    "train epochs": 10,
+    "train steps": 10,
+    "batches per device": 1,
+    "total batches observed per epoch": 1,
+    "train batch size": 1,
+    "gradient accumulation steps": 1
+}
+```
+
+| stage                         | memory_allocated | max_memory_reserved |
+|:-----------------------------:|:----------------:|:-------------------:|
+| after precomputing conditions | 14.232           | 14.461              |
+| after precomputing latents    | 14.717           | 17.244              |
+| before training start         | 24.195           | 26.039              |
+| after epoch 1                 | 24.83            | 42.387              |
+| before validation start       | 24.842           | 42.387              |
+| after validation end          | 39.558           | 46.947              |
+| after training end            | 24.842           | 41.039              |
+
+Note: requires about `47` GB of VRAM with precomputation. If validation is not performed, the memory usage is reduced to about `42` GB.
+
 </details>
 
 If you would like to use a custom dataset, refer to the dataset preparation guide [here](./assets/dataset.md).
+
+> [!NOTE]
+> To lower memory requirements:
+> - Pass `--precompute_conditions` when launching training.
+> - Pass `--gradient_checkpointing` when launching training.
+> - Do not perform validation/testing. This saves a significant amount of memory, which can be used to focus solely on training if you're on smaller VRAM GPUs.
 
 ## Memory requirements
 
