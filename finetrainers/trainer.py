@@ -187,25 +187,25 @@ class Trainer:
 
         def collate_fn(batch):
             latent_conditions = [x["latent_conditions"] for x in batch]
-            other_conditions = [x["other_conditions"] for x in batch]
+            text_conditions = [x["text_conditions"] for x in batch]
             batched_latent_conditions = {}
-            batched_other_conditions = {}
+            batched_text_conditions = {}
             for key in list(latent_conditions[0].keys()):
                 if torch.is_tensor(latent_conditions[0][key]):
                     batched_latent_conditions[key] = torch.cat([x[key] for x in latent_conditions], dim=0)
                 else:
                     # TODO(aryan): implement batch sampler for precomputed latents
                     batched_latent_conditions[key] = [x[key] for x in latent_conditions][0]
-            for key in list(other_conditions[0].keys()):
-                if torch.is_tensor(other_conditions[0][key]):
-                    batched_other_conditions[key] = torch.cat([x[key] for x in other_conditions], dim=0)
+            for key in list(text_conditions[0].keys()):
+                if torch.is_tensor(text_conditions[0][key]):
+                    batched_text_conditions[key] = torch.cat([x[key] for x in text_conditions], dim=0)
                 else:
                     # TODO(aryan): implement batch sampler for precomputed latents
-                    batched_other_conditions[key] = [x[key] for x in other_conditions][0]
-            return {"latent_conditions": batched_latent_conditions, "other_conditions": batched_other_conditions}
+                    batched_text_conditions[key] = [x[key] for x in text_conditions][0]
+            return {"latent_conditions": batched_latent_conditions, "text_conditions": batched_text_conditions}
 
-        should_recompute = should_perform_precomputation(self.args.data_root)
-        if not should_recompute:
+        should_precompute = should_perform_precomputation(self.args.data_root)
+        if not should_precompute:
             logger.info("Precomputed conditions and latents found. Loading precomputed data.")
             self.dataloader = torch.utils.data.DataLoader(
                 PrecomputedDataset(self.args.data_root),
@@ -259,7 +259,7 @@ class Trainer:
                 f"Precomputing conditions and latents for batch {i + 1}/{len(self.dataset)} on process {self.state.accelerator.process_index}"
             )
 
-            other_conditions = self.model_config["prepare_conditions"](
+            text_conditions = self.model_config["prepare_conditions"](
                 tokenizer=self.tokenizer,
                 tokenizer_2=self.tokenizer_2,
                 tokenizer_3=self.tokenizer_3,
@@ -271,7 +271,7 @@ class Trainer:
                 dtype=self.state.weight_dtype,
             )
             filename = conditions_dir / f"conditions-{i}-{index}.pt"
-            torch.save(other_conditions, filename.as_posix())
+            torch.save(text_conditions, filename.as_posix())
             index += 1
             progress_bar.update(1)
         self._delete_components()
@@ -596,7 +596,7 @@ class Trainer:
                             dtype=weight_dtype,
                             generator=generator,
                         )
-                        other_conditions = self.model_config["prepare_conditions"](
+                        text_conditions = self.model_config["prepare_conditions"](
                             tokenizer=self.tokenizer,
                             text_encoder=self.text_encoder,
                             tokenizer_2=self.tokenizer_2,
@@ -607,27 +607,27 @@ class Trainer:
                         )
                     else:
                         latent_conditions = batch["latent_conditions"]
-                        other_conditions = batch["other_conditions"]
+                        text_conditions = batch["text_conditions"]
                         latent_conditions["latents"] = DiagonalGaussianDistribution(
                             latent_conditions["latents"]
                         ).sample(generator)
                         if "post_latent_preparation" in self.model_config.keys():
                             latent_conditions = self.model_config["post_latent_preparation"](**latent_conditions)
                         align_device_and_dtype(latent_conditions, accelerator.device, weight_dtype)
-                        align_device_and_dtype(other_conditions, accelerator.device, weight_dtype)
+                        align_device_and_dtype(text_conditions, accelerator.device, weight_dtype)
                         batch_size = latent_conditions["latents"].shape[0]
 
                     latent_conditions = make_contiguous(latent_conditions)
-                    other_conditions = make_contiguous(other_conditions)
+                    text_conditions = make_contiguous(text_conditions)
 
                     if self.args.caption_dropout_technique == "zero":
                         if random.random() < self.args.caption_dropout_p:
-                            other_conditions["prompt_embeds"].fill_(0)
-                            other_conditions["prompt_attention_mask"].fill_(False)
+                            text_conditions["prompt_embeds"].fill_(0)
+                            text_conditions["prompt_attention_mask"].fill_(False)
 
                             # TODO(aryan): refactor later
-                            if "pooled_prompt_embeds" in other_conditions:
-                                other_conditions["pooled_prompt_embeds"].fill_(0)
+                            if "pooled_prompt_embeds" in text_conditions:
+                                text_conditions["pooled_prompt_embeds"].fill_(0)
 
                     # These weighting schemes use a uniform timestep sampling and instead post-weight the loss
                     weights = compute_density_for_timestep_sampling(
@@ -650,14 +650,13 @@ class Trainer:
                     noisy_latents = (1.0 - sigmas) * latent_conditions["latents"] + sigmas * noise
 
                     latent_conditions.update({"noisy_latents": noisy_latents})
-                    other_conditions.update({"timesteps": timesteps})
 
                     # These weighting schemes use a uniform timestep sampling and instead post-weight the loss
                     weights = compute_loss_weighting_for_sd3(
                         weighting_scheme=self.args.flow_weighting_scheme, sigmas=sigmas
                     )
                     pred = self.model_config["forward_pass"](
-                        transformer=self.transformer, **latent_conditions, **other_conditions
+                        transformer=self.transformer, timesteps=timesteps, **latent_conditions, **text_conditions
                     )
                     target = noise - latent_conditions["latents"]
 

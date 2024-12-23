@@ -271,9 +271,9 @@ class PrecomputedDataset(Dataset):
         self.conditions_path = self.data_root / PRECOMPUTED_DIR_NAME / PRECOMPUTED_CONDITIONS_DIR_NAME
 
         self.latent_conditions = sorted(os.listdir(self.latents_path))
-        self.other_conditions = sorted(os.listdir(self.conditions_path))
+        self.text_conditions = sorted(os.listdir(self.conditions_path))
 
-        assert len(self.latent_conditions) == len(self.other_conditions), "Number of captions and videos do not match"
+        assert len(self.latent_conditions) == len(self.text_conditions), "Number of captions and videos do not match"
 
     def __len__(self) -> int:
         return len(self.latent_conditions)
@@ -281,9 +281,9 @@ class PrecomputedDataset(Dataset):
     def __getitem__(self, index: int) -> Dict[str, Any]:
         conditions = {}
         latent_path = self.latents_path / self.latent_conditions[index]
-        condition_path = self.conditions_path / self.other_conditions[index]
+        condition_path = self.conditions_path / self.text_conditions[index]
         conditions["latent_conditions"] = torch.load(latent_path, map_location="cpu", weights_only=True)
-        conditions["other_conditions"] = torch.load(condition_path, map_location="cpu", weights_only=True)
+        conditions["text_conditions"] = torch.load(condition_path, map_location="cpu", weights_only=True)
         return conditions
 
 
