@@ -138,7 +138,7 @@ class Trainer:
         self.vae = components.get("vae", self.vae)
         self.scheduler = components.get("scheduler", self.scheduler)
 
-    def _nuke_components(self) -> None:
+    def _delete_components(self) -> None:
         self.tokenizer = None
         self.tokenizer_2 = None
         self.tokenizer_3 = None
@@ -274,7 +274,7 @@ class Trainer:
             torch.save(other_conditions, filename.as_posix())
             index += 1
             progress_bar.update(1)
-        self._nuke_components()
+        self._delete_components()
 
         memory_statistics = get_memory_statistics()
         logger.info(f"Memory after precomputing conditions: {json.dumps(memory_statistics, indent=4)}")
@@ -323,7 +323,7 @@ class Trainer:
             torch.save(latent_conditions, filename.as_posix())
             index += 1
             progress_bar.update(1)
-        self._nuke_components()
+        self._delete_components()
 
         self.state.accelerator.wait_for_everyone()
         logger.info("Precomputation complete")
@@ -669,7 +669,8 @@ class Trainer:
                     accelerator.backward(loss)
 
                     if accelerator.sync_gradients and accelerator.distributed_type != DistributedType.DEEPSPEED:
-                        accelerator.clip_grad_norm_(self.transformer.parameters(), self.args.max_grad_norm)
+                        grad_norm = accelerator.clip_grad_norm_(self.transformer.parameters(), self.args.max_grad_norm)
+                        logs["grad_norm"] = grad_norm
 
                     self.optimizer.step()
                     self.lr_scheduler.step()

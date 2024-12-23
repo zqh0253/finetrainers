@@ -17,7 +17,7 @@ logger = get_logger("finetrainers")  # pylint: disable=invalid-name
 
 
 def load_condition_models(
-    model_id: str = "tencent/HunyuanVideo",
+    model_id: str = "hunyuanvideo-community/HunyuanVideo",
     text_encoder_dtype: torch.dtype = torch.float16,
     text_encoder_2_dtype: torch.dtype = torch.float16,
     revision: Optional[str] = None,
@@ -43,7 +43,7 @@ def load_condition_models(
 
 
 def load_latent_models(
-    model_id: str = "tencent/HunyuanVideo",
+    model_id: str = "hunyuanvideo-community/HunyuanVideo",
     vae_dtype: torch.dtype = torch.float16,
     revision: Optional[str] = None,
     cache_dir: Optional[str] = None,
@@ -56,12 +56,12 @@ def load_latent_models(
 
 
 def load_diffusion_models(
-    model_id: str = "tencent/HunyuanVideo",
+    model_id: str = "hunyuanvideo-community/HunyuanVideo",
     transformer_dtype: torch.dtype = torch.bfloat16,
     revision: Optional[str] = None,
     cache_dir: Optional[str] = None,
     **kwargs,
-) -> Dict[str, nn.Module]:
+) -> Dict[str, Union[nn.Module, FlowMatchEulerDiscreteScheduler]]:
     transformer = HunyuanVideoTransformer3DModel.from_pretrained(
         model_id, subfolder="transformer", torch_dtype=transformer_dtype, revision=revision, cache_dir=cache_dir
     )
@@ -70,7 +70,7 @@ def load_diffusion_models(
 
 
 def initialize_pipeline(
-    model_id: str = "tencent/HunyuanVideo",
+    model_id: str = "hunyuanvideo-community/HunyuanVideo",
     text_encoder_dtype: torch.dtype = torch.float16,
     text_encoder_2_dtype: torch.dtype = torch.float16,
     transformer_dtype: torch.dtype = torch.bfloat16,

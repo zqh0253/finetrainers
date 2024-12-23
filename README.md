@@ -273,8 +273,7 @@ OUTPUT_DIR="/path/to/models/hunyuan-video/hunyuan-video-loras/hunyuan-video_caki
 
 # Model arguments
 model_cmd="--model_name hunyuan_video \
-  --pretrained_model_name_or_path tencent/HunyuanVideo
-  --revision refs/pr/18"
+  --pretrained_model_name_or_path hunyuanvideo-community/HunyuanVideo"
 
 # Dataset arguments
 dataset_cmd="--data_root $DATA_ROOT \
@@ -356,7 +355,7 @@ import torch
 from diffusers import HunyuanVideoPipeline, HunyuanVideoTransformer3DModel
 from diffusers.utils import export_to_video
 
-model_id = "tencent/HunyuanVideo"
+model_id = "hunyuanvideo-community/HunyuanVideo"
 transformer = HunyuanVideoTransformer3DModel.from_pretrained(
     model_id, subfolder="transformer", torch_dtype=torch.bfloat16
 )
