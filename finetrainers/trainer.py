@@ -813,6 +813,10 @@ class Trainer:
                 num_videos_per_prompt=self.args.num_validation_videos_per_prompt,
                 generator=self.state.generator,
             )
+            
+            # Remove all hooks that might have been added during pipeline initialization to the models
+            pipeline.remove_all_hooks()
+            del pipeline
 
             prompt_filename = string_to_filename(prompt)[:25]
             artifacts = {
