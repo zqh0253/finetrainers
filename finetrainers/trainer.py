@@ -117,7 +117,6 @@ class Trainer:
             "text_encoder_2_dtype": self.args.text_encoder_2_dtype,
             "text_encoder_3_dtype": self.args.text_encoder_3_dtype,
             "transformer_dtype": self.args.transformer_dtype,
-            "unet_dtype": self.args.unet_dtype,
             "vae_dtype": self.args.vae_dtype,
             "revision": self.args.revision,
             "cache_dir": self.args.cache_dir,

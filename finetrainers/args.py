@@ -26,7 +26,6 @@ class Args:
     text_encoder_2_dtype: torch.dtype = torch.bfloat16
     text_encoder_3_dtype: torch.dtype = torch.bfloat16
     transformer_dtype: torch.dtype = torch.bfloat16
-    unet_dtype: torch.dtype = torch.bfloat16
     vae_dtype: torch.dtype = torch.bfloat16
 
     # Dataset arguments
@@ -126,7 +125,6 @@ class Args:
                 "text_encoder_2_dtype": self.text_encoder_2_dtype,
                 "text_encoder_3_dtype": self.text_encoder_3_dtype,
                 "transformer_dtype": self.transformer_dtype,
-                "unet_dtype": self.unet_dtype,
                 "vae_dtype": self.vae_dtype,
             },
             "dataset_arguments": {
@@ -255,7 +253,6 @@ def _add_model_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--text_encoder_2_dtype", type=str, default="bf16", help="Data type for the text encoder 2.")
     parser.add_argument("--text_encoder_3_dtype", type=str, default="bf16", help="Data type for the text encoder 3.")
     parser.add_argument("--transformer_dtype", type=str, default="bf16", help="Data type for the transformer model.")
-    parser.add_argument("--unet_dtype", type=str, default="bf16", help="Data type for the U-Net model.")
     parser.add_argument("--vae_dtype", type=str, default="bf16", help="Data type for the VAE model.")
 
 
@@ -693,7 +690,6 @@ def _map_to_args_type(args: Dict[str, Any]) -> Args:
     result_args.text_encoder_2_dtype = _DTYPE_MAP[args.text_encoder_2_dtype]
     result_args.text_encoder_3_dtype = _DTYPE_MAP[args.text_encoder_3_dtype]
     result_args.transformer_dtype = _DTYPE_MAP[args.transformer_dtype]
-    result_args.unet_dtype = _DTYPE_MAP[args.unet_dtype]
     result_args.vae_dtype = _DTYPE_MAP[args.vae_dtype]
 
     # Dataset arguments
