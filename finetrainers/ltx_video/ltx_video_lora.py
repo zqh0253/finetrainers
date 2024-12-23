@@ -151,7 +151,10 @@ def prepare_latents(
         else:
             h = vae._encode(image_or_video)
         _, _, num_frames, height, width = h.shape
-        # TODO(aryan): this is very very very stupid, but anything to make it work for now. refactor and design better later
+
+        # TODO(aryan): This is very stupid that we might possibly be storing the latents_mean and latents_std in every file
+        # if precomputation is enabled. We should probably have a single file where re-usable properties like this are stored
+        # so as to reduce the disk memory requirements of the precomputed files.
         return {
             "latents": h,
             "num_frames": num_frames,
