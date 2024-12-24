@@ -48,7 +48,7 @@ from .utils.file_utils import string_to_filename
 from .utils.optimizer_utils import get_optimizer
 from .utils.memory_utils import get_memory_statistics, free_memory, make_contiguous
 from .utils.torch_utils import unwrap_model, align_device_and_dtype
-from .utils.checkpointing import sort_out_and_load_latest_ckpt_states, save_intermediate_ckpt_states
+from .utils.checkpointing import get_latest_ckpt_path_to_resume_from, get_intermediate_ckpt_path
 
 
 logger = get_logger("finetrainers")
@@ -561,12 +561,13 @@ class Trainer:
         initial_global_step = 0
         
         # Potentially load in the weights and states from a previous save
-        initial_global_step, global_step, first_epoch = sort_out_and_load_latest_ckpt_states(
-            accelerator=self.state.accelerator, 
+        resume_from_checkpoint_path, initial_global_step, global_step, first_epoch = get_latest_ckpt_path_to_resume_from(
             resume_from_checkpoint=self.args.resume_from_checkpoint, 
             num_update_steps_per_epoch=self.state.num_update_steps_per_epoch, 
             output_dir=self.args.output_dir
         )
+        if resume_from_checkpoint_path:
+            self.state.accelerator.load_state(resume_from_checkpoint_path)
 
         progress_bar = tqdm(
             range(0, self.state.train_steps),
@@ -699,9 +700,10 @@ class Trainer:
                     # Checkpointing
                     if accelerator.distributed_type == DistributedType.DEEPSPEED or accelerator.is_main_process:
                         if global_step % self.args.checkpointing_steps == 0:
-                            save_intermediate_ckpt_states(
-                                accelerator=accelerator, checkpointing_limit=self.args.checkpointing_limit, step=global_step, output_dir=self.args.output_dir
+                            save_path = get_intermediate_ckpt_path(
+                                checkpointing_limit=self.args.checkpointing_limit, step=global_step, output_dir=self.args.output_dir
                             )
+                            accelerator.save_state(save_path)
 
                 # Maybe run validation
                 should_run_validation = (
@@ -748,12 +750,11 @@ class Trainer:
                 transformer_lora_layers=transformer_lora_layers,
             )
 
+            self.validate(step=global_step, final_validation=True)
             if self.args.push_to_hub:
                 upload_folder(
                     repo_id=self.state.repo_id, folder_path=self.args.output_dir, ignore_patterns=["checkpoint-*"]
                 )
-            
-            self.validate(step=global_step, final_validation=True)
 
         del self.tokenizer, self.text_encoder, self.transformer, self.vae, self.scheduler
         free_memory()
@@ -795,6 +796,7 @@ class Trainer:
             )
         else:
             # `torch_dtype` is manually set within `initialize_pipeline()`.
+            self._delete_components()
             pipeline = self.model_config["initialize_pipeline"](
                 model_id=self.args.pretrained_model_name_or_path, 
                 device=accelerator.device,

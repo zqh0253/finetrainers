@@ -1,4 +1,5 @@
 import os
+from typing import Tuple
 from accelerate.logging import get_logger
 from ..constants import FINETRAINERS_LOG_LEVEL
 from ..utils.file_utils import find_files, delete_files
@@ -6,13 +7,14 @@ from ..utils.file_utils import find_files, delete_files
 logger = get_logger("finetrainers")
 logger.setLevel(FINETRAINERS_LOG_LEVEL)
 
-def sort_out_and_load_latest_ckpt_states(
-        accelerator, resume_from_checkpoint, num_update_steps_per_epoch, output_dir
-    ):
+def get_latest_ckpt_path_to_resume_from(
+    resume_from_checkpoint: str, num_update_steps_per_epoch: int, output_dir: str
+) -> Tuple[str, int, int, int]:
     if not resume_from_checkpoint:
         initial_global_step = 0
         global_step = 0
         first_epoch = 0
+        resume_from_checkpoint_path = None
     else:
         if resume_from_checkpoint != "latest":
             path = os.path.basename(resume_from_checkpoint)
@@ -29,18 +31,19 @@ def sort_out_and_load_latest_ckpt_states(
             )
             resume_from_checkpoint = None
             initial_global_step = 0
+            resume_from_checkpoint_path = None
         else:
             logger.info(f"Resuming from checkpoint {path}")
-            accelerator.load_state(os.path.join(output_dir, path))
+            resume_from_checkpoint_path = os.path.join(output_dir, path)
             global_step = int(path.split("-")[1])
 
             initial_global_step = global_step
             first_epoch = global_step // num_update_steps_per_epoch
 
-    return initial_global_step, global_step, first_epoch
+    return resume_from_checkpoint_path, initial_global_step, global_step, first_epoch
 
 
-def save_intermediate_ckpt_states(accelerator, checkpointing_limit, step, output_dir):
+def get_intermediate_ckpt_path(checkpointing_limit: int, step: int, output_dir: str) -> str:
     # before saving state, check if this save would set us over the `checkpointing_limit`
     if checkpointing_limit is not None:
         checkpoints = find_files(output_dir, prefix="checkpoint")
@@ -53,5 +56,5 @@ def save_intermediate_ckpt_states(accelerator, checkpointing_limit, step, output
 
     logger.info(f"Checkpointing at step {step}")
     save_path = os.path.join(output_dir, f"checkpoint-{step}")
-    accelerator.save_state(save_path)
-    logger.info(f"Saved state to {save_path}")
+    logger.info(f"Saving state to {save_path}")
+    return save_path
