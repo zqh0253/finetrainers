@@ -675,6 +675,7 @@ _DTYPE_MAP = {
     "fp16": torch.float16,
     "fp32": torch.float32,
 }
+_INVERSE_DTYPE_MAP = {v: k for k, v in _DTYPE_MAP.items()}
 
 
 def _map_to_args_type(args: Dict[str, Any]) -> Args:
