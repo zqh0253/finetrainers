@@ -954,7 +954,7 @@ class Trainer:
 
             if self.args.push_to_hub:
                 repo_id = self.args.hub_model_id or Path(self.args.output_dir).name
-                self.state.repo_id = create_repo(token=self.args.hub_token, name=repo_id).repo_id
+                self.state.repo_id = create_repo(token=self.args.hub_token, repo_id=repo_id).repo_id
 
     def _move_components_to_device(self):
         if self.text_encoder is not None:
