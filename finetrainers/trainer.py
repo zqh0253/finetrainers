@@ -694,8 +694,17 @@ class Trainer:
                     loss = loss.mean()
                     accelerator.backward(loss)
 
-                    if accelerator.sync_gradients and accelerator.distributed_type != DistributedType.DEEPSPEED:
-                        grad_norm = accelerator.clip_grad_norm_(self.transformer.parameters(), self.args.max_grad_norm)
+                    if accelerator.sync_gradients:
+                        if accelerator.distributed_type == DistributedType.DEEPSPEED:
+                            grad_norm = self.transformer.get_global_grad_norm()
+                            # In some cases the grad norm may not return a float
+                            if hasattr(grad_norm, "item"):
+                                grad_norm = grad_norm.item()
+                        else:
+                            grad_norm = accelerator.clip_grad_norm_(
+                                self.transformer.parameters(), self.args.max_grad_norm
+                            )
+
                         logs["grad_norm"] = grad_norm
 
                     self.optimizer.step()
