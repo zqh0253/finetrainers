@@ -31,6 +31,8 @@ def get_latest_ckpt_path_to_resume_from(
             )
             resume_from_checkpoint = None
             initial_global_step = 0
+            global_step = 0
+            first_epoch = 0
             resume_from_checkpoint_path = None
         else:
             logger.info(f"Resuming from checkpoint {path}")
