@@ -7,6 +7,7 @@ from ..utils.file_utils import find_files, delete_files
 logger = get_logger("finetrainers")
 logger.setLevel(FINETRAINERS_LOG_LEVEL)
 
+
 def get_latest_ckpt_path_to_resume_from(
     resume_from_checkpoint: str, num_update_steps_per_epoch: int, output_dir: str
 ) -> Tuple[str, int, int, int]:
@@ -26,9 +27,7 @@ def get_latest_ckpt_path_to_resume_from(
             path = dirs[-1] if len(dirs) > 0 else None
 
         if path is None:
-            logger.info(
-                f"Checkpoint '{resume_from_checkpoint}' does not exist. Starting a new training run."
-            )
+            logger.info(f"Checkpoint '{resume_from_checkpoint}' does not exist. Starting a new training run.")
             resume_from_checkpoint = None
             initial_global_step = 0
             global_step = 0

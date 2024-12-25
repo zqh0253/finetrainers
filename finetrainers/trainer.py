@@ -423,16 +423,21 @@ class Trainer:
             if not self.state.accelerator.distributed_type == DistributedType.DEEPSPEED:
                 while len(models) > 0:
                     model = models.pop()
-                    if isinstance(unwrap_model(self.state.accelerator, model), type(unwrap_model(self.state.accelerator, self.transformer))):
+                    if isinstance(
+                        unwrap_model(self.state.accelerator, model),
+                        type(unwrap_model(self.state.accelerator, self.transformer)),
+                    ):
                         transformer_ = unwrap_model(self.state.accelerator, model)
                     else:
-                        raise ValueError(f"Unexpected save model: {unwrap_model(self.state.accelerator, model).__class__}")
+                        raise ValueError(
+                            f"Unexpected save model: {unwrap_model(self.state.accelerator, model).__class__}"
+                        )
             else:
                 transformer_ = unwrap_model(self.state.accelerator, self.transformer).__class__.from_pretrained(
                     self.args.pretrained_model_name_or_path, subfolder="transformer"
                 )
                 transformer_.add_adapter(transformer_lora_config)
-            
+
             lora_state_dict = self.model_config["pipeline_cls"].lora_state_dict(input_dir)
             transformer_state_dict = {
                 f'{k.replace("transformer.", "")}': v
@@ -559,12 +564,17 @@ class Trainer:
         global_step = 0
         first_epoch = 0
         initial_global_step = 0
-        
+
         # Potentially load in the weights and states from a previous save
-        resume_from_checkpoint_path, initial_global_step, global_step, first_epoch = get_latest_ckpt_path_to_resume_from(
-            resume_from_checkpoint=self.args.resume_from_checkpoint, 
-            num_update_steps_per_epoch=self.state.num_update_steps_per_epoch, 
-            output_dir=self.args.output_dir
+        (
+            resume_from_checkpoint_path,
+            initial_global_step,
+            global_step,
+            first_epoch,
+        ) = get_latest_ckpt_path_to_resume_from(
+            resume_from_checkpoint=self.args.resume_from_checkpoint,
+            num_update_steps_per_epoch=self.state.num_update_steps_per_epoch,
+            output_dir=self.args.output_dir,
         )
         if resume_from_checkpoint_path:
             self.state.accelerator.load_state(resume_from_checkpoint_path)
@@ -701,7 +711,9 @@ class Trainer:
                     if accelerator.distributed_type == DistributedType.DEEPSPEED or accelerator.is_main_process:
                         if global_step % self.args.checkpointing_steps == 0:
                             save_path = get_intermediate_ckpt_path(
-                                checkpointing_limit=self.args.checkpointing_limit, step=global_step, output_dir=self.args.output_dir
+                                checkpointing_limit=self.args.checkpointing_limit,
+                                step=global_step,
+                                output_dir=self.args.output_dir,
                             )
                             accelerator.save_state(save_path)
 
@@ -750,7 +762,9 @@ class Trainer:
                 transformer_lora_layers=transformer_lora_layers,
             )
 
-            self.validate(step=global_step, final_validation=True)
+        self.validate(step=global_step, final_validation=True)
+
+        if accelerator.is_main_process:
             if self.args.push_to_hub:
                 upload_folder(
                     repo_id=self.state.repo_id, folder_path=self.args.output_dir, ignore_patterns=["checkpoint-*"]
@@ -798,7 +812,7 @@ class Trainer:
             # `torch_dtype` is manually set within `initialize_pipeline()`.
             self._delete_components()
             pipeline = self.model_config["initialize_pipeline"](
-                model_id=self.args.pretrained_model_name_or_path, 
+                model_id=self.args.pretrained_model_name_or_path,
                 device=accelerator.device,
                 revision=self.args.revision,
                 cache_dir=self.args.cache_dir,
@@ -876,7 +890,7 @@ class Trainer:
                 elif artifact_type == "video":
                     logger.debug(f"Saving video to {filename}")
                     # TODO: this should be configurable here as well as in validation runs where we call the pipeline that has `fps`.
-                    export_to_video(artifact_value, filename, fps=15) 
+                    export_to_video(artifact_value, filename, fps=15)
                     artifact_value = wandb.Video(filename, caption=prompt)
 
                 all_processes_artifacts.append(artifact_value)
