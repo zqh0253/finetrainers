@@ -515,7 +515,7 @@ class Trainer:
         self.state.num_trainable_parameters = sum(p.numel() for p in transformer_lora_parameters)
 
         use_deepspeed_opt = (
-            self.state.accelerator.state.deepspeed_plugin is not None 
+            self.state.accelerator.state.deepspeed_plugin is not None
             and "optimizer" in self.state.accelerator.state.deepspeed_plugin.deepspeed_config
         )
         optimizer = get_optimizer(
@@ -527,7 +527,7 @@ class Trainer:
             beta3=self.args.beta3,
             epsilon=self.args.epsilon,
             weight_decay=self.args.weight_decay,
-            use_deepspeed=use_deepspeed_opt
+            use_deepspeed=use_deepspeed_opt,
         )
 
         num_update_steps_per_epoch = math.ceil(len(self.dataloader) / self.args.gradient_accumulation_steps)
@@ -546,7 +546,7 @@ class Trainer:
             num_training_steps=self.state.train_steps * self.state.accelerator.num_processes,
             num_cycles=self.args.lr_num_cycles,
             power=self.args.lr_power,
-            use_deepspeed=use_deepspeed_lr_schd
+            use_deepspeed=use_deepspeed_lr_schd,
         )
 
         self.optimizer = optimizer
@@ -766,7 +766,8 @@ class Trainer:
                 if should_run_validation:
                     self.validate(global_step)
 
-                logs = {"loss": loss.detach().item(), "lr": self.lr_scheduler.get_last_lr()[0]}
+                logs["loss"] = loss.detach().item()
+                logs["lr"] = self.lr_scheduler.get_last_lr()[0]
                 progress_bar.set_postfix(logs)
                 accelerator.log(logs, step=global_step)
 
