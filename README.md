@@ -385,6 +385,7 @@ If you would like to use a custom dataset, refer to the dataset preparation guid
 
 > [!NOTE]
 > To lower memory requirements:
+> - Use a DeepSpeed config to launch training (refer to [`accelerate_configs/deepspeed.yaml`](./accelerate_configs/deepspeed.yaml) as an example).
 > - Pass `--precompute_conditions` when launching training.
 > - Pass `--gradient_checkpointing` when launching training.
 > - Do not perform validation/testing. This saves a significant amount of memory, which can be used to focus solely on training if you're on smaller VRAM GPUs.
