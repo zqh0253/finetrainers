@@ -340,7 +340,7 @@ class Trainer:
             pin_memory=self.args.pin_memory,
         )
 
-    def sort_out_weight_dtype(self, accelerator):
+    def _get_training_dtype(self, accelerator):
         weight_dtype = torch.float32
         if accelerator.state.deepspeed_plugin:
             # DeepSpeed is handling precision, use what's in the DeepSpeed config
@@ -392,8 +392,8 @@ class Trainer:
         # TODO(aryan): handle torch dtype from accelerator vs model dtype; refactor
         self.state.weight_dtype = weight_dtype
         if self.args.mixed_precision != _INVERSE_DTYPE_MAP[weight_dtype]:
-            logger.info(
-                f"`mixed_precision` was set to {_INVERSE_DTYPE_MAP[weight_dtype]} which different from what was initially passed ({self.args.mixed_precision})."
+            logger.warning(
+                f"`mixed_precision` was set to {_INVERSE_DTYPE_MAP[weight_dtype]} which is different from configured argument ({self.args.mixed_precision})."
             )
         self.args.mixed_precision = _INVERSE_DTYPE_MAP[weight_dtype]
         self.transformer.to(dtype=weight_dtype)
