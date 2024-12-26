@@ -340,27 +340,6 @@ class Trainer:
             pin_memory=self.args.pin_memory,
         )
 
-    def _get_training_dtype(self, accelerator):
-        weight_dtype = torch.float32
-        if accelerator.state.deepspeed_plugin:
-            # DeepSpeed is handling precision, use what's in the DeepSpeed config
-            if (
-                "fp16" in accelerator.state.deepspeed_plugin.deepspeed_config
-                and accelerator.state.deepspeed_plugin.deepspeed_config["fp16"]["enabled"]
-            ):
-                weight_dtype = torch.float16
-            if (
-                "bf16" in accelerator.state.deepspeed_plugin.deepspeed_config
-                and accelerator.state.deepspeed_plugin.deepspeed_config["bf16"]["enabled"]
-            ):
-                weight_dtype = torch.bfloat16
-        else:
-            if self.state.accelerator.mixed_precision == "fp16":
-                weight_dtype = torch.float16
-            elif self.state.accelerator.mixed_precision == "bf16":
-                weight_dtype = torch.bfloat16
-        return weight_dtype
-
     def prepare_trainable_parameters(self) -> None:
         logger.info("Initializing trainable parameters")
 
@@ -381,7 +360,7 @@ class Trainer:
 
         # For mixed precision training we cast all non-trainable weights (vae, text_encoder and transformer) to half-precision
         # as these weights are only used for inference, keeping weights in full precision is not required.
-        weight_dtype = self.sort_out_weight_dtype(accelerator=self.state.accelerator)
+        weight_dtype = self._get_training_dtype(accelerator=self.state.accelerator)
 
         if torch.backends.mps.is_available() and weight_dtype == torch.bfloat16:
             # due to pytorch#99272, MPS does not yet support bfloat16.
@@ -1031,3 +1010,24 @@ class Trainer:
             self.unet = self.unet.to(self.state.accelerator.device)
         if self.vae is not None:
             self.vae = self.vae.to(self.state.accelerator.device)
+
+    def _get_training_dtype(self, accelerator) -> torch.dtype:
+        weight_dtype = torch.float32
+        if accelerator.state.deepspeed_plugin:
+            # DeepSpeed is handling precision, use what's in the DeepSpeed config
+            if (
+                "fp16" in accelerator.state.deepspeed_plugin.deepspeed_config
+                and accelerator.state.deepspeed_plugin.deepspeed_config["fp16"]["enabled"]
+            ):
+                weight_dtype = torch.float16
+            if (
+                "bf16" in accelerator.state.deepspeed_plugin.deepspeed_config
+                and accelerator.state.deepspeed_plugin.deepspeed_config["bf16"]["enabled"]
+            ):
+                weight_dtype = torch.bfloat16
+        else:
+            if self.state.accelerator.mixed_precision == "fp16":
+                weight_dtype = torch.float16
+            elif self.state.accelerator.mixed_precision == "bf16":
+                weight_dtype = torch.bfloat16
+        return weight_dtype
