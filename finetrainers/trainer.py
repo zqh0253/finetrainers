@@ -730,12 +730,14 @@ class Trainer:
                         if accelerator.distributed_type == DistributedType.DEEPSPEED:
                             grad_norm = self.transformer.get_global_grad_norm()
                             # In some cases the grad norm may not return a float
-                            if hasattr(grad_norm, "item"):
+                            if torch.is_tensor(grad_norm):
                                 grad_norm = grad_norm.item()
                         else:
                             grad_norm = accelerator.clip_grad_norm_(
                                 self.transformer.parameters(), self.args.max_grad_norm
                             )
+                            if torch.is_tensor(grad_norm):
+                                grad_norm = grad_norm.item()
 
                         logs["grad_norm"] = grad_norm
 
