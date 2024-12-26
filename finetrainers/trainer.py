@@ -535,19 +535,31 @@ class Trainer:
             self.state.train_steps = self.state.train_epochs * num_update_steps_per_epoch
             self.state.overwrote_max_train_steps = True
 
-        use_deepspeed_lr_schd = (
+        use_deepspeed_lr_scheduler = (
             self.state.accelerator.state.deepspeed_plugin is not None
             and "scheduler" in self.state.accelerator.state.deepspeed_plugin.deepspeed_config
         )
-        lr_scheduler = get_scheduler(
-            name=self.args.lr_scheduler,
-            optimizer=optimizer,
-            num_warmup_steps=self.args.lr_warmup_steps * self.state.accelerator.num_processes,
-            num_training_steps=self.state.train_steps * self.state.accelerator.num_processes,
-            num_cycles=self.args.lr_num_cycles,
-            power=self.args.lr_power,
-            use_deepspeed=use_deepspeed_lr_schd,
-        )
+        total_training_steps = self.state.train_steps * self.state.accelerator.num_processes
+        num_warmup_steps = self.args.lr_warmup_steps * self.state.accelerator.num_processes
+        
+        if use_deepspeed_lr_scheduler:
+            from accelerate.utils import DummyScheduler
+
+            lr_scheduler = DummyScheduler(
+                name=self.args.lr_scheduler,
+                optimizer=optimizer,
+                total_num_steps=total_training_steps,
+                num_warmup_steps=num_warmup_steps,
+            )
+        else:
+            lr_scheduler = get_scheduler(
+                name=self.args.lr_scheduler,
+                optimizer=optimizer,
+                num_warmup_steps=num_warmup_steps,
+                num_training_steps=total_training_steps,
+                num_cycles=self.args.lr_num_cycles,
+                power=self.args.lr_power,
+            )
 
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
