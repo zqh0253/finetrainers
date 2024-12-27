@@ -60,7 +60,9 @@ class Args:
     # Training arguments
     training_type: str = None
     seed: int = 42
-    mixed_precision: str = None
+    mixed_precision: str = (
+        None  # TODO: consider removing later https://github.com/a-r-r-o-w/finetrainers/pull/139#discussion_r1897438414
+    )
     batch_size: int = 1
     train_epochs: int = 1
     train_steps: int = None
@@ -675,6 +677,7 @@ _DTYPE_MAP = {
     "fp16": torch.float16,
     "fp32": torch.float32,
 }
+_INVERSE_DTYPE_MAP = {v: k for k, v in _DTYPE_MAP.items()}
 
 
 def _map_to_args_type(args: Dict[str, Any]) -> Args:

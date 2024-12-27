@@ -1,5 +1,4 @@
 import inspect
-import logging
 
 from accelerate.logging import get_logger
 import torch
