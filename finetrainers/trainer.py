@@ -923,7 +923,15 @@ class Trainer:
             tracker_key = "final" if final_validation else "validation"
             for tracker in accelerator.trackers:
                 if tracker.name == "wandb":
-                    tracker.log({tracker_key: all_artifacts}, step=step)
+                    image_artifacts = [artifact for artifact in all_artifacts if isinstance(artifact, wandb.Image)]
+                    video_artifacts = [artifact for artifact in all_artifacts if isinstance(artifact, wandb.Video)]
+                    tracker.log(
+                        {
+                            tracker_key: {"images": image_artifacts, "videos": video_artifacts},
+                        },
+                        step=step,
+                    )
+
 
         # Remove all hooks that might have been added during pipeline initialization to the models
         pipeline.remove_all_hooks()
