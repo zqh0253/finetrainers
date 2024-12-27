@@ -520,7 +520,7 @@ class Trainer:
         )
         total_training_steps = self.state.train_steps * self.state.accelerator.num_processes
         num_warmup_steps = self.args.lr_warmup_steps * self.state.accelerator.num_processes
-        
+
         if use_deepspeed_lr_scheduler:
             from accelerate.utils import DummyScheduler
 
@@ -714,7 +714,6 @@ class Trainer:
                     loss = loss.mean(list(range(1, loss.ndim)))
                     # Average loss across batch dimension
                     loss = loss.mean()
-                    print(f"{self.transformer.dtype=}, {accelerator.mixed_precision=}")
                     accelerator.backward(loss)
 
                     if accelerator.sync_gradients:

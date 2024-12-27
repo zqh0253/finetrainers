@@ -60,7 +60,9 @@ class Args:
     # Training arguments
     training_type: str = None
     seed: int = 42
-    mixed_precision: str = None # TODO: consider removing later https://github.com/a-r-r-o-w/finetrainers/pull/139#discussion_r1897438414
+    mixed_precision: str = (
+        None  # TODO: consider removing later https://github.com/a-r-r-o-w/finetrainers/pull/139#discussion_r1897438414
+    )
     batch_size: int = 1
     train_epochs: int = 1
     train_steps: int = None
