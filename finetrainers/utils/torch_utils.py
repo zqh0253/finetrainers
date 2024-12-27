@@ -27,3 +27,9 @@ def align_device_and_dtype(
         if dtype is not None:
             x = {k: align_device_and_dtype(v, device, dtype) for k, v in x.items()}
     return x
+
+
+def expand_tensor_to_dims(tensor, ndim):
+    while len(tensor.shape) < ndim:
+        tensor = tensor.unsqueeze(-1)
+    return tensor

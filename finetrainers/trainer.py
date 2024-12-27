@@ -47,7 +47,7 @@ from .utils.data_utils import should_perform_precomputation
 from .utils.file_utils import string_to_filename
 from .utils.optimizer_utils import get_optimizer
 from .utils.memory_utils import get_memory_statistics, free_memory, make_contiguous
-from .utils.torch_utils import unwrap_model, align_device_and_dtype
+from .utils.torch_utils import unwrap_model, align_device_and_dtype, expand_tensor_to_dims
 from .utils.checkpointing import get_latest_ckpt_path_to_resume_from, get_intermediate_ckpt_path
 
 
@@ -696,6 +696,7 @@ class Trainer:
                         device=accelerator.device,
                         dtype=weight_dtype,
                     )
+                    sigmas = expand_tensor_to_dims(sigmas, ndim=latent_conditions["latents"].ndim)
                     noisy_latents = (1.0 - sigmas) * latent_conditions["latents"] + sigmas * noise
 
                     latent_conditions.update({"noisy_latents": noisy_latents})
