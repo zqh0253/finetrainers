@@ -43,6 +43,14 @@ class Args:
         Data type for the transformer model.
     vae_dtype (`torch.dtype`, defaults to `torch.bfloat16`):
         Data type for the VAE model.
+    layerwise_upcasting_modules (`List[str]`, defaults to `[]`):
+        Modules that should have fp8 storage weights but higher precision computation. Choose between ['transformer'].
+    layerwise_upcasting_storage_dtype (`torch.dtype`, defaults to `float8_e4m3fn`):
+        Data type for the layerwise upcasting storage. Choose between ['float8_e4m3fn', 'float8_e5m2'].
+    layerwise_upcasting_skip_modules_pattern (`List[str]`, defaults to `["patch_embed", "pos_embed", "x_embedder", "context_embedder", "^proj_in$", "^proj_out$", "norm"]`):
+        Modules to skip for layerwise upcasting. Layers such as normalization and modulation, when casted to fp8 precision
+        naively (as done in layerwise upcasting), can lead to poorer training and inference quality. We skip these layers
+        by default, and recommend adding more layers to the default list based on the model architecture.
 
     DATASET ARGUMENTS
     -----------------
@@ -126,8 +134,6 @@ class Args:
         Type of training to perform. Choose between ['lora'].
     seed (`int`, defaults to `42`):
         A seed for reproducible training.
-    mixed_precision (`str`, defaults to `None`):
-        Whether to use mixed precision. Choose between ['no', 'fp8', 'fp16', 'bf16'].
     batch_size (`int`, defaults to `1`):
         Per-device batch size.
     train_epochs (`int`, defaults to `1`):
@@ -243,6 +249,18 @@ class Args:
     text_encoder_3_dtype: torch.dtype = torch.bfloat16
     transformer_dtype: torch.dtype = torch.bfloat16
     vae_dtype: torch.dtype = torch.bfloat16
+    layerwise_upcasting_modules: List[str] = []
+    layerwise_upcasting_storage_dtype: torch.dtype = torch.float8_e4m3fn
+    layerwise_upcasting_skip_modules_pattern: List[str] = [
+        "patch_embed",
+        "pos_embed",
+        "x_embedder",
+        "context_embedder",
+        "time_embed",
+        "^proj_in$",
+        "^proj_out$",
+        "norm",
+    ]
 
     # Dataset arguments
     data_root: str = None
@@ -277,9 +295,6 @@ class Args:
     # Training arguments
     training_type: str = None
     seed: int = 42
-    mixed_precision: str = (
-        None  # TODO: consider removing later https://github.com/a-r-r-o-w/finetrainers/pull/139#discussion_r1897438414
-    )
     batch_size: int = 1
     train_epochs: int = 1
     train_steps: int = None
@@ -347,6 +362,9 @@ class Args:
                 "text_encoder_3_dtype": self.text_encoder_3_dtype,
                 "transformer_dtype": self.transformer_dtype,
                 "vae_dtype": self.vae_dtype,
+                "layerwise_upcasting_modules": self.layerwise_upcasting_modules,
+                "layerwise_upcasting_storage_dtype": self.layerwise_upcasting_storage_dtype,
+                "layerwise_upcasting_skip_modules_pattern": self.layerwise_upcasting_skip_modules_pattern,
             },
             "dataset_arguments": {
                 "data_root": self.data_root,
@@ -381,7 +399,6 @@ class Args:
             "training_arguments": {
                 "training_type": self.training_type,
                 "seed": self.seed,
-                "mixed_precision": self.mixed_precision,
                 "batch_size": self.batch_size,
                 "train_epochs": self.train_epochs,
                 "train_steps": self.train_steps,
@@ -464,6 +481,7 @@ def parse_arguments() -> Args:
 
 
 def validate_args(args: Args):
+    _validated_model_args(args)
     _validate_training_args(args)
     _validate_validation_args(args)
 
@@ -506,6 +524,28 @@ def _add_model_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--text_encoder_3_dtype", type=str, default="bf16", help="Data type for the text encoder 3.")
     parser.add_argument("--transformer_dtype", type=str, default="bf16", help="Data type for the transformer model.")
     parser.add_argument("--vae_dtype", type=str, default="bf16", help="Data type for the VAE model.")
+    parser.add_argument(
+        "--layerwise_upcasting_modules",
+        type=str,
+        default=[],
+        nargs="+",
+        choices=["transformer"],
+        help="Modules that should have fp8 storage weights but higher precision computation.",
+    )
+    parser.add_argument(
+        "--layerwise_upcasting_storage_dtype",
+        type=str,
+        default="float8_e4m3fn",
+        choices=["float8_e4m3fn", "float8_e5m2"],
+        help="Data type for the layerwise upcasting storage.",
+    )
+    parser.add_argument(
+        "--layerwise_upcasting_skip_modules_pattern",
+        type=str,
+        default=["patch_embed", "pos_embed", "x_embedder", "context_embedder", "^proj_in$", "^proj_out$", "norm"],
+        nargs="+",
+        help="Modules to skip for layerwise upcasting.",
+    )
 
 
 def _add_dataset_arguments(parser: argparse.ArgumentParser) -> None:
@@ -688,16 +728,6 @@ def _add_training_arguments(parser: argparse.ArgumentParser) -> None:
         help="Type of training to perform. Choose between ['lora', 'full-finetune']",
     )
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
-    parser.add_argument(
-        "--mixed_precision",
-        type=str,
-        default="no",
-        choices=["no", "fp8", "fp16", "bf16"],
-        help=(
-            "Whether to use mixed precision. Defaults to the value of accelerate config of the current system or the "
-            "flag passed with the `accelerate.launch` command. Use this argument to override the accelerate config."
-        ),
-    )
     parser.add_argument(
         "--batch_size",
         type=int,
@@ -979,8 +1009,9 @@ _DTYPE_MAP = {
     "bf16": torch.bfloat16,
     "fp16": torch.float16,
     "fp32": torch.float32,
+    "float8_e4m3fn": torch.float8_e4m3fn,
+    "float8_e5m2": torch.float8_e5m2,
 }
-_INVERSE_DTYPE_MAP = {v: k for k, v in _DTYPE_MAP.items()}
 
 
 def _map_to_args_type(args: Dict[str, Any]) -> Args:
@@ -997,6 +1028,9 @@ def _map_to_args_type(args: Dict[str, Any]) -> Args:
     result_args.text_encoder_3_dtype = _DTYPE_MAP[args.text_encoder_3_dtype]
     result_args.transformer_dtype = _DTYPE_MAP[args.transformer_dtype]
     result_args.vae_dtype = _DTYPE_MAP[args.vae_dtype]
+    result_args.layerwise_upcasting_modules = args.layerwise_upcasting_modules
+    result_args.layerwise_upcasting_storage_dtype = _DTYPE_MAP[args.layerwise_upcasting_storage_dtype]
+    result_args.layerwise_upcasting_skip_modules_pattern = args.layerwise_upcasting_skip_modules_pattern
 
     # Dataset arguments
     if args.data_root is None and args.dataset_file is None:
@@ -1034,7 +1068,6 @@ def _map_to_args_type(args: Dict[str, Any]) -> Args:
     # Training arguments
     result_args.training_type = args.training_type
     result_args.seed = args.seed
-    result_args.mixed_precision = args.mixed_precision
     result_args.batch_size = args.batch_size
     result_args.train_epochs = args.train_epochs
     result_args.train_steps = args.train_steps
@@ -1115,6 +1148,13 @@ def _map_to_args_type(args: Dict[str, Any]) -> Args:
     result_args.report_to = args.report_to
 
     return result_args
+
+
+def _validated_model_args(args: Args):
+    if args.training_type == "full-finetune":
+        assert (
+            "transformer" not in args.layerwise_upcasting_modules
+        ), "Layerwise upcasting is not supported for full-finetune training"
 
 
 def _validate_training_args(args: Args):

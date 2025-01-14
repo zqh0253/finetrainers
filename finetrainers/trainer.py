@@ -31,7 +31,7 @@ from huggingface_hub import create_repo, upload_folder
 from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dict
 from tqdm import tqdm
 
-from .args import _INVERSE_DTYPE_MAP, Args, validate_args
+from .args import Args, validate_args
 from .constants import (
     FINETRAINERS_LOG_LEVEL,
     PRECOMPUTED_CONDITIONS_DIR_NAME,
@@ -39,7 +39,9 @@ from .constants import (
     PRECOMPUTED_LATENTS_DIR_NAME,
 )
 from .dataset import BucketSampler, ImageOrVideoDatasetWithResizing, PrecomputedDataset
+from .hooks import apply_layerwise_upcasting
 from .models import get_config_from_model_name
+from .patches import perform_peft_patches
 from .state import State
 from .utils.checkpointing import get_intermediate_ckpt_path, get_latest_ckpt_path_to_resume_from
 from .utils.data_utils import should_perform_precomputation
@@ -96,6 +98,14 @@ class Trainer:
         self._init_distributed()
         self._init_logging()
         self._init_directories_and_repositories()
+        self._init_config_options()
+
+        # Peform any patches needed for training
+        if len(self.args.layerwise_upcasting_modules) > 0:
+            perform_peft_patches()
+        # TODO(aryan): handle text encoders
+        # if any(["text_encoder" in component_name for component_name in self.args.layerwise_upcasting_modules]):
+        #     perform_text_encoder_patches()
 
         self.state.model_name = self.args.model_name
         self.model_config = get_config_from_model_name(self.args.model_name, self.args.training_type)
@@ -235,7 +245,7 @@ class Trainer:
                 text_encoder_3=self.text_encoder_3,
                 prompt=data["prompt"],
                 device=accelerator.device,
-                dtype=self.state.weight_dtype,
+                dtype=self.args.transformer_dtype,
             )
             filename = conditions_dir / f"conditions-{accelerator.process_index}-{index}.pt"
             torch.save(text_conditions, filename.as_posix())
@@ -277,7 +287,7 @@ class Trainer:
                 vae=self.vae,
                 image_or_video=data["video"].unsqueeze(0),
                 device=accelerator.device,
-                dtype=self.state.weight_dtype,
+                dtype=self.args.transformer_dtype,
                 generator=self.state.generator,
                 precompute=True,
             )
@@ -322,24 +332,18 @@ class Trainer:
             logger.info("Finetuning transformer with PEFT parameters")
             self._disable_grad_for_components([self.transformer])
 
-        # For mixed precision training we cast all non-trainable weights (vae, text_encoder and transformer) to half-precision
-        # as these weights are only used for inference, keeping weights in full precision is not required.
-        weight_dtype = self._get_training_dtype(accelerator=self.state.accelerator)
-
-        if torch.backends.mps.is_available() and weight_dtype == torch.bfloat16:
-            # Due to pytorch#99272, MPS does not yet support bfloat16.
-            raise ValueError(
-                "Mixed precision training with bfloat16 is not supported on MPS. Please use fp16 (recommended) or fp32 instead."
+        # Layerwise upcasting must be applied before adding the LoRA adapter.
+        # If we don't perform this before moving to device, we might OOM on the GPU. So, best to do it on
+        # CPU for now, before support is added in Diffusers for loading and enabling layerwise upcasting directly.
+        if self.args.training_type == "lora" and "transformer" in self.args.layerwise_upcasting_modules:
+            apply_layerwise_upcasting(
+                self.transformer,
+                storage_dtype=self.args.layerwise_upcasting_storage_dtype,
+                compute_dtype=self.args.transformer_dtype,
+                skip_modules_pattern=self.args.layerwise_upcasting_skip_modules_pattern,
+                non_blocking=True,
             )
 
-        # TODO(aryan): handle torch dtype from accelerator vs model dtype; refactor
-        self.state.weight_dtype = weight_dtype
-        if self.args.mixed_precision != _INVERSE_DTYPE_MAP[weight_dtype]:
-            logger.warning(
-                f"`mixed_precision` was set to {_INVERSE_DTYPE_MAP[weight_dtype]} which is different from configured argument ({self.args.mixed_precision})."
-            )
-        self.args.mixed_precision = _INVERSE_DTYPE_MAP[weight_dtype]
-        self.transformer.to(dtype=weight_dtype)
         self._move_components_to_device()
 
         if self.args.gradient_checkpointing:
@@ -356,9 +360,8 @@ class Trainer:
         else:
             transformer_lora_config = None
 
-        # Enable TF32 for faster training on Ampere GPUs: https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
-        if self.args.allow_tf32 and torch.cuda.is_available():
-            torch.backends.cuda.matmul.allow_tf32 = True
+        # TODO(aryan): it might be nice to add some assertions here to make sure that lora parameters are still in fp32
+        # even if layerwise upcasting. Would be nice to have a test as well
 
         self.register_saving_loading_hooks(transformer_lora_config)
 
@@ -434,13 +437,6 @@ class Trainer:
                                 f"Loading adapter weights from state_dict led to unexpected keys not found in the model: "
                                 f" {unexpected_keys}. "
                             )
-
-                    # Make sure the trainable params are in float32. This is again needed since the base models
-                    # are in `weight_dtype`. More details:
-                    # https://github.com/huggingface/diffusers/pull/6514#discussion_r1449796804
-                    if self.args.mixed_precision == "fp16" and self.args.training_type == "lora":
-                        # only upcast trainable parameters (LoRA) into fp32
-                        cast_training_params([transformer_], dtype=torch.float32)
                 else:
                     transformer_ = transformer_cls_.from_pretrained(os.path.join(input_dir, "transformer"))
 
@@ -454,8 +450,7 @@ class Trainer:
         self.state.train_steps = self.args.train_steps
 
         # Make sure the trainable params are in float32
-        if self.args.mixed_precision == "fp16" and self.args.training_type == "lora":
-            # only upcast trainable parameters (LoRA) into fp32
+        if self.args.training_type == "lora":
             cast_training_params([self.transformer], dtype=torch.float32)
 
         self.state.learning_rate = self.args.lr
@@ -612,7 +607,6 @@ class Trainer:
         )
 
         accelerator = self.state.accelerator
-        weight_dtype = self.state.weight_dtype
         generator = torch.Generator(device=accelerator.device)
         if self.args.seed is not None:
             generator = generator.manual_seed(self.args.seed)
@@ -659,7 +653,7 @@ class Trainer:
                             patch_size=self.transformer_config.patch_size,
                             patch_size_t=self.transformer_config.patch_size_t,
                             device=accelerator.device,
-                            dtype=weight_dtype,
+                            dtype=self.args.transformer_dtype,
                             generator=self.state.generator,
                         )
                         text_conditions = self.model_config["prepare_conditions"](
@@ -669,7 +663,7 @@ class Trainer:
                             text_encoder_2=self.text_encoder_2,
                             prompt=prompts,
                             device=accelerator.device,
-                            dtype=weight_dtype,
+                            dtype=self.args.transformer_dtype,
                         )
                     else:
                         latent_conditions = batch["latent_conditions"]
@@ -686,8 +680,8 @@ class Trainer:
                             patch_size_t=self.transformer_config.patch_size_t,
                             **latent_conditions,
                         )
-                        align_device_and_dtype(latent_conditions, accelerator.device, weight_dtype)
-                        align_device_and_dtype(text_conditions, accelerator.device, weight_dtype)
+                        align_device_and_dtype(latent_conditions, accelerator.device, self.args.transformer_dtype)
+                        align_device_and_dtype(text_conditions, accelerator.device, self.args.transformer_dtype)
                         batch_size = latent_conditions["latents"].shape[0]
 
                     latent_conditions = make_contiguous(latent_conditions)
@@ -720,7 +714,7 @@ class Trainer:
                         latent_conditions["latents"].shape,
                         generator=self.state.generator,
                         device=accelerator.device,
-                        dtype=weight_dtype,
+                        dtype=self.args.transformer_dtype,
                     )
                     sigmas = expand_tensor_dims(sigmas, ndim=noise.ndim)
 
@@ -1002,13 +996,11 @@ class Trainer:
         init_process_group_kwargs = InitProcessGroupKwargs(
             backend="nccl", timeout=timedelta(seconds=self.args.nccl_timeout)
         )
-        mixed_precision = "no" if torch.backends.mps.is_available() else self.args.mixed_precision
         report_to = None if self.args.report_to.lower() == "none" else self.args.report_to
 
         accelerator = Accelerator(
             project_config=project_config,
             gradient_accumulation_steps=self.args.gradient_accumulation_steps,
-            mixed_precision=mixed_precision,
             log_with=report_to,
             kwargs_handlers=[ddp_kwargs, init_process_group_kwargs],
         )
@@ -1048,6 +1040,11 @@ class Trainer:
             if self.args.push_to_hub:
                 repo_id = self.args.hub_model_id or Path(self.args.output_dir).name
                 self.state.repo_id = create_repo(token=self.args.hub_token, repo_id=repo_id, exist_ok=True).repo_id
+
+    def _init_config_options(self) -> None:
+        # Enable TF32 for faster training on Ampere GPUs: https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
+        if self.args.allow_tf32 and torch.cuda.is_available():
+            torch.backends.cuda.matmul.allow_tf32 = True
 
     def _move_components_to_device(self):
         if self.text_encoder is not None:
@@ -1109,27 +1106,6 @@ class Trainer:
         free_memory()
         torch.cuda.synchronize(self.state.accelerator.device)
 
-    def _get_training_dtype(self, accelerator) -> torch.dtype:
-        weight_dtype = torch.float32
-        if accelerator.state.deepspeed_plugin:
-            # DeepSpeed is handling precision, use what's in the DeepSpeed config
-            if (
-                "fp16" in accelerator.state.deepspeed_plugin.deepspeed_config
-                and accelerator.state.deepspeed_plugin.deepspeed_config["fp16"]["enabled"]
-            ):
-                weight_dtype = torch.float16
-            if (
-                "bf16" in accelerator.state.deepspeed_plugin.deepspeed_config
-                and accelerator.state.deepspeed_plugin.deepspeed_config["bf16"]["enabled"]
-            ):
-                weight_dtype = torch.bfloat16
-        else:
-            if self.state.accelerator.mixed_precision == "fp16":
-                weight_dtype = torch.float16
-            elif self.state.accelerator.mixed_precision == "bf16":
-                weight_dtype = torch.bfloat16
-        return weight_dtype
-
     def _get_and_prepare_pipeline_for_validation(self, final_validation: bool = False) -> DiffusionPipeline:
         accelerator = self.state.accelerator
         if not final_validation:
@@ -1147,6 +1123,7 @@ class Trainer:
                 enable_slicing=self.args.enable_slicing,
                 enable_tiling=self.args.enable_tiling,
                 enable_model_cpu_offload=self.args.enable_model_cpu_offload,
+                is_training=True,
             )
         else:
             self._delete_components()
@@ -1165,6 +1142,7 @@ class Trainer:
                 enable_slicing=self.args.enable_slicing,
                 enable_tiling=self.args.enable_tiling,
                 enable_model_cpu_offload=self.args.enable_model_cpu_offload,
+                is_training=False,
             )
 
             # Load the LoRA weights if performing LoRA finetuning

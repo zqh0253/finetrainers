@@ -37,7 +37,6 @@ dataloader_cmd="--dataloader_num_workers 4"
 # Training arguments
 training_cmd="--training_type lora \
   --seed 42 \
-  --mixed_precision bf16 \
   --batch_size 1 \
   --precompute_conditions \
   --train_steps 1000 \
@@ -87,6 +86,12 @@ echo -ne "-------------------- Finished executing script --------------------\n\
 ## Memory Usage
 
 ### LoRA
+
+<!-- TODO(aryan): Update these numbers for 49x512x768 -->
+
+> [!NOTE]
+>
+> The below measurements are done in `torch.bfloat16` precision. Memory usage can further be reduce by passing `--layerwise_upcasting_modules transformer` to the training script. This will cast the model weights to `torch.float8_e4m3fn` or `torch.float8_e5m2`, which halves the memory requirement for model weights. Computation is performed in the dtype set by `--transformer_dtype` (which defaults to `bf16`).
 
 LoRA with rank 128, batch size 1, gradient checkpointing, optimizer adamw, `49x480x720` resolutions, **with precomputation**:
 

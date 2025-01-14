@@ -12,6 +12,7 @@ FineTrainers is a work-in-progress library to support (accessible) training of v
 
 ## News
 
+- 🔥 **2024-01-15**: Support for naive FP8 weight-casting training added! This allows training HunyuanVideo in under 24 GB upto specific resolutions.
 - 🔥 **2024-01-13**: Support for T2V full-finetuning added! Thanks to @ArEnSc for taking up the initiative!
 - 🔥 **2024-01-03**: Support for T2V LoRA finetuning of [CogVideoX](https://huggingface.co/docs/diffusers/main/api/pipelines/cogvideox) added! 
 - 🔥 **2024-12-20**: Support for T2V LoRA finetuning of [Hunyuan Video](https://huggingface.co/docs/diffusers/main/api/pipelines/hunyuan_video) added! We would like to thank @SHYuanBest for his work on a training script [here](https://github.com/huggingface/diffusers/pull/10254).
@@ -83,7 +84,6 @@ diffusion_cmd="--flow_weighting_scheme logit_normal"
 # Training arguments
 training_cmd="--training_type lora \
   --seed 42 \
-  --mixed_precision bf16 \
   --batch_size 1 \
   --train_steps 3000 \
   --rank 128 \
@@ -140,14 +140,14 @@ For inference, refer [here](./docs/training/ltx_video.md#inference). For docs re
 
 | **Model Name**                                   | **Tasks**     | **Min. LoRA VRAM<sup>*</sup>**     | **Min. Full Finetuning VRAM<sup>^</sup>**     |
 |:------------------------------------------------:|:-------------:|:----------------------------------:|:---------------------------------------------:|
-| [LTX-Video](./docs/training/ltx_video.md)        | Text-to-Video | 11 GB                              | 21 GB                                         |
-| [HunyuanVideo](./docs/training/hunyuan_video.md) | Text-to-Video | 42 GB                              | OOM                                           |
-| [CogVideoX-5b](./docs/training/cogvideox.md)     | Text-to-Video | 21 GB                              | 53 GB                                         |
+| [LTX-Video](./docs/training/ltx_video.md)        | Text-to-Video | 5 GB                               | 21 GB                                         |
+| [HunyuanVideo](./docs/training/hunyuan_video.md) | Text-to-Video | 32 GB                              | OOM                                           |
+| [CogVideoX-5b](./docs/training/cogvideox.md)     | Text-to-Video | 18 GB                              | 53 GB                                         |
 
 </div>
 
-<sub><sup>*</sup>Noted for training-only, no validation, at resolution `49x512x768`, rank 128, with pre-computation, using fp8 weights & gradient checkpointing. Pre-computation of conditions and latents may require higher limits (but typically under 16 GB).</sub><br/>
-<sub><sup>^</sup>Noted for training-only, no validation, at resolution `49x512x768`, with pre-computation, using bf16 weights & gradient checkpointing.</sub>
+<sub><sup>*</sup>Noted for training-only, no validation, at resolution `49x512x768`, rank 128, with pre-computation, using **FP8** weights & gradient checkpointing. Pre-computation of conditions and latents may require higher limits (but typically under 16 GB).</sub><br/>
+<sub><sup>^</sup>Noted for training-only, no validation, at resolution `49x512x768`, with pre-computation, using **BF16** weights & gradient checkpointing.</sub>
 
 If you would like to use a custom dataset, refer to the dataset preparation guide [here](./docs/dataset/README.md).
 
