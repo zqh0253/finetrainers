@@ -840,7 +840,7 @@ class Trainer:
                 )
             else:
                 transformer.save_pretrained(os.path.join(self.args.output_dir, "transformer"))
-
+        accelerator.wait_for_everyone()
         self.validate(step=global_step, final_validation=True)
 
         if accelerator.is_main_process:
@@ -917,7 +917,8 @@ class Trainer:
                 "video": {"type": "video", "value": video},
             }
             for i, (artifact_type, artifact_value) in enumerate(validation_artifacts):
-                artifacts.update({f"artifact_{i}": {"type": artifact_type, "value": artifact_value}})
+                if artifact_value:
+                    artifacts.update({f"artifact_{i}": {"type": artifact_type, "value": artifact_value}})
             logger.debug(
                 f"Validation artifacts on process {accelerator.process_index}: {list(artifacts.keys())}",
                 main_process_only=False,
@@ -936,11 +937,11 @@ class Trainer:
                     prompts_to_filenames[prompt] = filename
                 filename = os.path.join(self.args.output_dir, filename)
 
-                if artifact_type == "image":
+                if artifact_type == "image" and artifact_value:
                     logger.debug(f"Saving image to {filename}")
                     artifact_value.save(filename)
                     artifact_value = wandb.Image(filename)
-                elif artifact_type == "video":
+                elif artifact_type == "video" and artifact_value:
                     logger.debug(f"Saving video to {filename}")
                     # TODO: this should be configurable here as well as in validation runs where we call the pipeline that has `fps`.
                     export_to_video(artifact_value, filename, fps=frame_rate)
@@ -954,14 +955,16 @@ class Trainer:
             tracker_key = "final" if final_validation else "validation"
             for tracker in accelerator.trackers:
                 if tracker.name == "wandb":
+                    artifact_log_dict = {}
+
                     image_artifacts = [artifact for artifact in all_artifacts if isinstance(artifact, wandb.Image)]
+                    if len(image_artifacts) > 0:
+                        artifact_log_dict["images"] = image_artifacts
                     video_artifacts = [artifact for artifact in all_artifacts if isinstance(artifact, wandb.Video)]
-                    tracker.log(
-                        {
-                            tracker_key: {"images": image_artifacts, "videos": video_artifacts},
-                        },
-                        step=step,
-                    )
+                    if len(video_artifacts) > 0:
+                        artifact_log_dict["videos"] = video_artifacts
+                    tracker.log({tracker_key: artifact_log_dict}, step=step)
+
             if self.args.push_to_hub and final_validation:
                 video_filenames = list(prompts_to_filenames.values())
                 prompts = list(prompts_to_filenames.keys())
@@ -1035,7 +1038,7 @@ class Trainer:
         if self.state.accelerator.is_main_process:
             self.args.output_dir = Path(self.args.output_dir)
             self.args.output_dir.mkdir(parents=True, exist_ok=True)
-            self.state.output_dir = self.args.output_dir
+            self.state.output_dir = Path(self.args.output_dir)
 
             if self.args.push_to_hub:
                 repo_id = self.args.hub_model_id or Path(self.args.output_dir).name
