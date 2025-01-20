@@ -275,6 +275,7 @@ class Args:
     caption_dropout_technique: str = "empty"
     precompute_conditions: bool = False
     remove_common_llm_caption_prefixes: bool = False
+    dataset_type: str = "origin"
 
     # Dataloader arguments
     dataloader_num_workers: int = 0
@@ -378,6 +379,7 @@ class Args:
                 "caption_dropout_p": self.caption_dropout_p,
                 "caption_dropout_technique": self.caption_dropout_technique,
                 "precompute_conditions": self.precompute_conditions,
+                "dataset_type": self.dataset_type,
                 "remove_common_llm_caption_prefixes": self.remove_common_llm_caption_prefixes,
             },
             "dataloader_arguments": {
@@ -633,6 +635,12 @@ def _add_dataset_arguments(parser: argparse.ArgumentParser) -> None:
         "--precompute_conditions",
         action="store_true",
         help="Whether or not to precompute the conditionings for the model.",
+    )
+    parser.add_argument(
+        "--dataset_type",
+        type=str,
+        default="origin",
+        help="Dataset type to use during training"
     )
     parser.add_argument(
         "--remove_common_llm_caption_prefixes",
@@ -1047,6 +1055,7 @@ def _map_to_args_type(args: Dict[str, Any]) -> Args:
     result_args.caption_dropout_p = args.caption_dropout_p
     result_args.caption_dropout_technique = args.caption_dropout_technique
     result_args.precompute_conditions = args.precompute_conditions
+    result_args.dataset_type = args.dataset_type 
     result_args.remove_common_llm_caption_prefixes = args.remove_common_llm_caption_prefixes
 
     # Dataloader arguments

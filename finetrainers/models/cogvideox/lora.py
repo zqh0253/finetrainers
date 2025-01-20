@@ -1,7 +1,8 @@
 from typing import Any, Dict, List, Optional, Union
 
 import torch
-from diffusers import AutoencoderKLCogVideoX, CogVideoXDDIMScheduler, CogVideoXPipeline, CogVideoXTransformer3DModel
+from diffusers import AutoencoderKLCogVideoX, CogVideoXDDIMScheduler, CogVideoXPipeline
+from .cogvideox_transformer_3d import CogVideoXTransformer3DModel
 from PIL import Image
 from transformers import T5EncoderModel, T5Tokenizer
 
@@ -152,7 +153,7 @@ def prepare_latents(
         # TODO(aryan): investigate this
         # else:
         #     latents = 1 / vae.config.scaling_factor * latents
-        latents = latents.to(dtype=dtype)
+        latents = latents.to(dtype=dtype).permute(0, 2, 1, 3, 4)
         return {"latents": latents}
     else:
         # handle vae scaling in the `train()` method directly.
@@ -184,6 +185,7 @@ def collate_fn_t2v(batch: List[List[Dict[str, torch.Tensor]]]) -> Dict[str, torc
     return {
         "prompts": [x["prompt"] for x in batch[0]],
         "videos": torch.stack([x["video"] for x in batch[0]]),
+        "xyz_videos": torch.stack([x["xyz_img"] for x in batch[0]]),
     }
 
 

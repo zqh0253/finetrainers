@@ -39,6 +39,7 @@ from .constants import (
     PRECOMPUTED_LATENTS_DIR_NAME,
 )
 from .dataset import BucketSampler, ImageOrVideoDatasetWithResizing, PrecomputedDataset
+from .fake_dataset import FakeDataset
 from .hooks import apply_layerwise_upcasting
 from .models import get_config_from_model_name
 from .patches import perform_peft_patches
@@ -114,15 +115,18 @@ class Trainer:
         # TODO(aryan): Make a background process for fetching
         logger.info("Initializing dataset and dataloader")
 
-        self.dataset = ImageOrVideoDatasetWithResizing(
-            data_root=self.args.data_root,
-            caption_column=self.args.caption_column,
-            video_column=self.args.video_column,
-            resolution_buckets=self.args.video_resolution_buckets,
-            dataset_file=self.args.dataset_file,
-            id_token=self.args.id_token,
-            remove_llm_prefixes=self.args.remove_common_llm_caption_prefixes,
-        )
+        if self.args.dataset_type == 'origin':
+            self.dataset = ImageOrVideoDatasetWithResizing(
+                data_root=self.args.data_root,
+                caption_column=self.args.caption_column,
+                video_column=self.args.video_column,
+                resolution_buckets=self.args.video_resolution_buckets,
+                dataset_file=self.args.dataset_file,
+                id_token=self.args.id_token,
+                remove_llm_prefixes=self.args.remove_common_llm_caption_prefixes,
+            )
+        elif self.args.dataset_type == 'fake':
+            self.dataset = FakeDataset()
         self.dataloader = torch.utils.data.DataLoader(
             self.dataset,
             batch_size=1,
@@ -640,12 +644,15 @@ class Trainer:
                 with accelerator.accumulate(models_to_accumulate):
                     if not self.args.precompute_conditions:
                         videos = batch["videos"]
+                        xyz_videos = batch["xyz_videos"]
                         prompts = batch["prompts"]
                         batch_size = len(prompts)
 
                         if self.args.caption_dropout_technique == "empty":
                             if random.random() < self.args.caption_dropout_p:
                                 prompts = [""] * batch_size
+
+                        src_videos = videos[:, 0:1]
 
                         latent_conditions = self.model_config["prepare_latents"](
                             vae=self.vae,
@@ -656,6 +663,26 @@ class Trainer:
                             dtype=self.args.transformer_dtype,
                             generator=self.state.generator,
                         )
+                        xyz_latent_conditions = self.model_config["prepare_latents"](
+                            vae=self.vae,
+                            image_or_video=xyz_videos,
+                            patch_size=self.transformer_config.patch_size,
+                            patch_size_t=self.transformer_config.patch_size_t,
+                            device=accelerator.device,
+                            dtype=self.args.transformer_dtype,
+                            generator=self.state.generator,
+                        )
+                        src_latent_conditions = self.model_config["prepare_latents"](
+                            vae=self.vae,
+                            image_or_video=src_videos,
+                            patch_size=self.transformer_config.patch_size,
+                            patch_size_t=self.transformer_config.patch_size_t,
+                            device=accelerator.device,
+                            dtype=self.args.transformer_dtype,
+                            generator=self.state.generator,
+                        )
+                        # latent_conditions, xyz_latent_conditions, src_latent_conditions 
+
                         text_conditions = self.model_config["prepare_conditions"](
                             tokenizer=self.tokenizer,
                             text_encoder=self.text_encoder,
@@ -684,6 +711,7 @@ class Trainer:
                         align_device_and_dtype(text_conditions, accelerator.device, self.args.transformer_dtype)
                         batch_size = latent_conditions["latents"].shape[0]
 
+                    latent_conditions["latents"] = torch.cat([latent_conditions["latents"], xyz_latent_conditions["latents"], src_latent_conditions["latents"]], 1)
                     latent_conditions = make_contiguous(latent_conditions)
                     text_conditions = make_contiguous(text_conditions)
 
@@ -709,6 +737,9 @@ class Trainer:
                         generator=self.state.generator,
                     )
                     timesteps = (sigmas * 1000.0).long()
+                    
+                    mask = torch.zeros_like(latent_conditions["latents"])
+                    mask[:, -1] = 1
 
                     noise = torch.randn(
                         latent_conditions["latents"].shape,
@@ -731,6 +762,7 @@ class Trainer:
                         # Default to flow-matching noise addition
                         noisy_latents = (1.0 - sigmas) * latent_conditions["latents"] + sigmas * noise
                         noisy_latents = noisy_latents.to(latent_conditions["latents"].dtype)
+                    noisy_latents = noisy_latents * (1-mask) + latent_conditions["latents"] * mask
 
                     latent_conditions.update({"noisy_latents": noisy_latents})
 
@@ -754,6 +786,8 @@ class Trainer:
                     )
 
                     loss = weights.float() * (pred["latents"].float() - target.float()).pow(2)
+                    # mask out the src view.
+                    loss = loss * (1 - mask)
                     # Average loss across all but batch dimension
                     loss = loss.mean(list(range(1, loss.ndim)))
                     # Average loss across batch dimension
