@@ -101,7 +101,8 @@ class FakeDataset(Dataset):
         mask[mask_idx] = 1
         prompt = ""
 
-        return dict(video=img, prompt="",
+        return dict(video=img, xyz_img=xyz_img, prompt="",
                     video_metadata=dict(num_frames=img.shape[0], height=img.shape[2], width=img.shape[3]),
+                    # above terms are necessary.
                     ray_map=ray_map, caption=caption, tokens=tokens, timestep=torch.tensor(idx), time_idxs=torch.tensor(idx), intrinsic=intrinsic, w2c=w2c, H=H, W=W,
-                    mask=mask, mask_idx=mask_idx, xyz_img=xyz_img, raw_xyz = raw_xyz)
+                    mask=mask, mask_idx=mask_idx, raw_xyz = raw_xyz)
