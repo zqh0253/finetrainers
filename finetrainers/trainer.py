@@ -654,6 +654,9 @@ class Trainer:
 
                         src_videos = videos[:, 0:1]
 
+                        if random.random() < self.args.img_dropout_p:
+                            src_videos = src_videos * 0
+
                         latent_conditions = self.model_config["prepare_latents"](
                             vae=self.vae,
                             image_or_video=videos,

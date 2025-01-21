@@ -272,6 +272,7 @@ class Args:
     video_resolution_buckets: List[Tuple[int, int, int]] = None
     video_reshape_mode: Optional[str] = None
     caption_dropout_p: float = 0.00
+    img_dropout_p: float = 0.00
     caption_dropout_technique: str = "empty"
     precompute_conditions: bool = False
     remove_common_llm_caption_prefixes: bool = False
@@ -377,6 +378,7 @@ class Args:
                 "video_resolution_buckets": self.video_resolution_buckets,
                 "video_reshape_mode": self.video_reshape_mode,
                 "caption_dropout_p": self.caption_dropout_p,
+                "img_dropout_p": self.img_dropout_p,
                 "caption_dropout_technique": self.caption_dropout_technique,
                 "precompute_conditions": self.precompute_conditions,
                 "dataset_type": self.dataset_type,
@@ -620,6 +622,12 @@ def _add_dataset_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--caption_dropout_p",
+        type=float,
+        default=0.00,
+        help="Probability of dropout for the caption tokens.",
+    )
+    parser.add_argument(
+        "--img_dropout_p",
         type=float,
         default=0.00,
         help="Probability of dropout for the caption tokens.",
@@ -1053,6 +1061,7 @@ def _map_to_args_type(args: Dict[str, Any]) -> Args:
     result_args.video_resolution_buckets = args.video_resolution_buckets or DEFAULT_VIDEO_RESOLUTION_BUCKETS
     result_args.video_reshape_mode = args.video_reshape_mode
     result_args.caption_dropout_p = args.caption_dropout_p
+    result_args.img_dropout_p = args.img_dropout_p
     result_args.caption_dropout_technique = args.caption_dropout_technique
     result_args.precompute_conditions = args.precompute_conditions
     result_args.dataset_type = args.dataset_type 

@@ -4,7 +4,6 @@ export NCCL_P2P_DISABLE=1
 export TORCH_NCCL_ENABLE_MONITORING=0
 export FINETRAINERS_LOG_LEVEL=DEBUG
 
-GPU_IDS="0"
 
 DATA_ROOT="/mnt/petrelfs/liangzhengyang.d/qh_projects/data/Disney-VideoGeneration-Dataset"
 CAPTION_COLUMN="prompt.txt"
@@ -23,6 +22,7 @@ dataset_cmd="--data_root $DATA_ROOT \
   --id_token $ID_TOKEN \
   --video_resolution_buckets 9x256x256 \
   --caption_dropout_p 1 \
+  --img_dropout_p 0.1 \
   --dataset_type fake"
  
 
