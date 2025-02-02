@@ -5,7 +5,7 @@ export TORCH_NCCL_ENABLE_MONITORING=0
 export FINETRAINERS_LOG_LEVEL=DEBUG
 
 
-DATA_ROOT="/mnt/petrelfs/liangzhengyang.d/qh_projects/data/Disney-VideoGeneration-Dataset"
+DATA_ROOT=""
 CAPTION_COLUMN="prompt.txt"
 VIDEO_COLUMN="videos.txt"
 OUTPUT_DIR="debug_ckpt"
@@ -13,7 +13,7 @@ ID_TOKEN="BW_STYLE"
 
 # Model arguments
 model_cmd="--model_name cogvideox \
-  --pretrained_model_name_or_path /mnt/petrelfs/liangzhengyang.d/.cache/huggingface/hub/CogVideoX-2b"
+  --pretrained_model_name_or_path THUDM/CogVideoX-2b"
 
 # Dataset arguments
 dataset_cmd="--data_root $DATA_ROOT \
@@ -35,9 +35,6 @@ training_cmd="--training_type  full-finetune\
   --seed 42 \
   --batch_size 4 \
   --train_steps 10000 \
-  --rank 128 \
-  --lora_alpha 128 \
-  --target_modules to_q to_k to_v to_out.0 \
   --gradient_accumulation_steps 1 \
   --gradient_checkpointing \
   --checkpointing_steps 500 \
