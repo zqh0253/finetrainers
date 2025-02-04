@@ -1,0 +1,24 @@
+name: 'Test Multi-node training'
+setup_command: 'bash apple/setup_env.sh'
+command: 'bash apple/launch.sh configs/training/Mtok/mtok_bl_vq.yaml'
+permissions:
+  viewers: mlr
+project_id: mlr_jgu32
+resources:
+  cluster: aws_2
+  task_type: 8gpu
+  memory_gb: 545
+  num_nodes: 2
+  num_gpus: 8
+  num_cpus: 48
+  disk_gb: 1024
+  docker_image: docker.apple.com/iris/iris:2.17.0
+  ports: ['NOTEBOOK_PORT', 'TENSORBOARD_PORT']
+  timeout: 1d
+attribution:
+    project: Text2Image_Diffusion
+    foundation_model: false
+    model_size: 500mb
+    spend: dev
+    development_type: training
+

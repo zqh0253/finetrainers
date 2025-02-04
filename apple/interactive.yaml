@@ -1,0 +1,22 @@
+name: 'interactive debug WVD2'
+setup_command: ''
+command: 'bash'
+permissions:
+  viewers: mlr
+project_id: mlr_jgu32
+resources:
+  cluster: aws_2
+  task_type: 8gpu
+  memory_gb: 545
+  num_cpus: 48
+  disk_gb: 1024
+  docker_image: docker.apple.com/iris/iris:2.17.0
+  ports: ['NOTEBOOK_PORT', 'TENSORBOARD_PORT']
+  timeout: 14d
+attribution:
+    project: Text2Image_Diffusion
+    foundation_model: false
+    model_size: 500mb
+    spend: dev
+    development_type: training
+
