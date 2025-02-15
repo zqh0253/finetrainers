@@ -142,9 +142,12 @@ class Trainer:
         load_components_kwargs = self._get_load_components_kwargs()
         condition_components, latent_components, diffusion_components = {}, {}, {}
         if not self.args.precompute_conditions:
-            condition_components = self.model_config["load_condition_models"](**load_components_kwargs)
-            latent_components = self.model_config["load_latent_models"](**load_components_kwargs)
-            diffusion_components = self.model_config["load_diffusion_models"](**load_components_kwargs)
+            # To download the model files first on the main process (if not already present)
+            # and then load the cached files afterward from the other processes.
+            with self.state.accelerator.main_process_first():
+                condition_components = self.model_config["load_condition_models"](**load_components_kwargs)
+                latent_components = self.model_config["load_latent_models"](**load_components_kwargs)
+                diffusion_components = self.model_config["load_diffusion_models"](**load_components_kwargs)
 
         components = {}
         components.update(condition_components)
@@ -208,7 +211,8 @@ class Trainer:
         logger.info("Precomputed conditions and latents not found. Running precomputation.")
 
         # At this point, no models are loaded, so we need to load and precompute conditions and latents
-        condition_components = self.model_config["load_condition_models"](**self._get_load_components_kwargs())
+        with self.state.accelerator.main_process_first():
+            condition_components = self.model_config["load_condition_models"](**self._get_load_components_kwargs())
         self._set_components(condition_components)
         self._move_components_to_device()
         self._disable_grad_for_components([self.text_encoder, self.text_encoder_2, self.text_encoder_3])
@@ -262,7 +266,8 @@ class Trainer:
         torch.cuda.reset_peak_memory_stats(accelerator.device)
 
         # Precompute latents
-        latent_components = self.model_config["load_latent_models"](**self._get_load_components_kwargs())
+        with self.state.accelerator.main_process_first():
+            latent_components = self.model_config["load_latent_models"](**self._get_load_components_kwargs())
         self._set_components(latent_components)
         self._move_components_to_device()
         self._disable_grad_for_components([self.vae])
@@ -323,7 +328,8 @@ class Trainer:
     def prepare_trainable_parameters(self) -> None:
         logger.info("Initializing trainable parameters")
 
-        diffusion_components = self.model_config["load_diffusion_models"](**self._get_load_components_kwargs())
+        with self.state.accelerator.main_process_first():
+            diffusion_components = self.model_config["load_diffusion_models"](**self._get_load_components_kwargs())
         self._set_components(diffusion_components)
 
         components = [self.text_encoder, self.text_encoder_2, self.text_encoder_3, self.vae]
@@ -542,7 +548,7 @@ class Trainer:
         logger.info("Initializing trackers")
 
         tracker_name = self.args.tracker_name or "finetrainers-experiment"
-        self.state.accelerator.init_trackers(tracker_name, config=self.args.to_dict())
+        self.state.accelerator.init_trackers(tracker_name, config=self._get_training_info())
 
     def train(self) -> None:
         logger.info("Starting training")
@@ -553,10 +559,10 @@ class Trainer:
         if self.vae_config is None:
             # If we've precomputed conditions and latents already, and are now re-using it, we will never load
             # the VAE so self.vae_config will not be set. So, we need to load it here.
-            vae_cls_name = resolve_vae_cls_from_ckpt_path(
+            vae_cls = resolve_vae_cls_from_ckpt_path(
                 self.args.pretrained_model_name_or_path, revision=self.args.revision, cache_dir=self.args.cache_dir
             )
-            vae_config = vae_cls_name.load_config(
+            vae_config = vae_cls.load_config(
                 self.args.pretrained_model_name_or_path,
                 subfolder="vae",
                 revision=self.args.revision,
@@ -877,7 +883,7 @@ class Trainer:
                 )
             else:
                 transformer.save_pretrained(os.path.join(self.args.output_dir, "transformer"))
-
+        accelerator.wait_for_everyone()
         self.validate(step=global_step, final_validation=True)
 
         if accelerator.is_main_process:
@@ -900,6 +906,13 @@ class Trainer:
 
         if num_validation_samples == 0:
             logger.warning("No validation samples found. Skipping validation.")
+            if accelerator.is_main_process:
+                save_model_card(
+                    args=self.args,
+                    repo_id=self.state.repo_id,
+                    videos=None,
+                    validation_prompts=None,
+                )
             return
 
         self.transformer.eval()
@@ -954,7 +967,8 @@ class Trainer:
                 "video": {"type": "video", "value": video},
             }
             for i, (artifact_type, artifact_value) in enumerate(validation_artifacts):
-                artifacts.update({f"artifact_{i}": {"type": artifact_type, "value": artifact_value}})
+                if artifact_value:
+                    artifacts.update({f"artifact_{i}": {"type": artifact_type, "value": artifact_value}})
             logger.debug(
                 f"Validation artifacts on process {accelerator.process_index}: {list(artifacts.keys())}",
                 main_process_only=False,
@@ -973,11 +987,11 @@ class Trainer:
                     prompts_to_filenames[prompt] = filename
                 filename = os.path.join(self.args.output_dir, filename)
 
-                if artifact_type == "image":
+                if artifact_type == "image" and artifact_value:
                     logger.debug(f"Saving image to {filename}")
                     artifact_value.save(filename)
                     artifact_value = wandb.Image(filename)
-                elif artifact_type == "video":
+                elif artifact_type == "video" and artifact_value:
                     logger.debug(f"Saving video to {filename}")
                     # TODO: this should be configurable here as well as in validation runs where we call the pipeline that has `fps`.
                     export_to_video(artifact_value, filename, fps=frame_rate)
@@ -991,14 +1005,16 @@ class Trainer:
             tracker_key = "final" if final_validation else "validation"
             for tracker in accelerator.trackers:
                 if tracker.name == "wandb":
+                    artifact_log_dict = {}
+
                     image_artifacts = [artifact for artifact in all_artifacts if isinstance(artifact, wandb.Image)]
+                    if len(image_artifacts) > 0:
+                        artifact_log_dict["images"] = image_artifacts
                     video_artifacts = [artifact for artifact in all_artifacts if isinstance(artifact, wandb.Video)]
-                    tracker.log(
-                        {
-                            tracker_key: {"images": image_artifacts, "videos": video_artifacts},
-                        },
-                        step=step,
-                    )
+                    if len(video_artifacts) > 0:
+                        artifact_log_dict["videos"] = video_artifacts
+                    tracker.log({tracker_key: artifact_log_dict}, step=step)
+
             if self.args.push_to_hub and final_validation:
                 video_filenames = list(prompts_to_filenames.values())
                 prompts = list(prompts_to_filenames.keys())
@@ -1072,7 +1088,7 @@ class Trainer:
         if self.state.accelerator.is_main_process:
             self.args.output_dir = Path(self.args.output_dir)
             self.args.output_dir.mkdir(parents=True, exist_ok=True)
-            self.state.output_dir = self.args.output_dir
+            self.state.output_dir = Path(self.args.output_dir)
 
             if self.args.push_to_hub:
                 repo_id = self.args.hub_model_id or Path(self.args.output_dir).name
@@ -1197,3 +1213,31 @@ class Trainer:
         for component in components:
             if component is not None:
                 component.requires_grad_(True)
+
+    def _get_training_info(self) -> dict:
+        args = self.args.to_dict()
+
+        training_args = args.get("training_arguments", {})
+        training_type = training_args.get("training_type", "")
+
+        # LoRA/non-LoRA stuff.
+        if training_type == "full-finetune":
+            filtered_training_args = {
+                k: v for k, v in training_args.items() if k not in {"rank", "lora_alpha", "target_modules"}
+            }
+        else:
+            filtered_training_args = training_args
+
+        # Diffusion/flow stuff.
+        diffusion_args = args.get("diffusion_arguments", {})
+        scheduler_name = self.scheduler.__class__.__name__
+        if scheduler_name != "FlowMatchEulerDiscreteScheduler":
+            filtered_diffusion_args = {k: v for k, v in diffusion_args.items() if "flow" not in k}
+        else:
+            filtered_diffusion_args = diffusion_args
+
+        # Rest of the stuff.
+        updated_training_info = args.copy()
+        updated_training_info["training_arguments"] = filtered_training_args
+        updated_training_info["diffusion_arguments"] = filtered_diffusion_args
+        return updated_training_info
