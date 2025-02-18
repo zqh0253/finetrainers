@@ -1103,7 +1103,7 @@ def _map_to_args_type(args: Dict[str, Any]) -> Args:
     # Optimizer arguments
     result_args.optimizer = args.optimizer or "adamw"
     result_args.use_8bit_bnb = args.use_8bit_bnb
-    result_args.lr = args.lr or 1e-4
+    result_args.lr = args.lr or 0
     result_args.scale_lr = args.scale_lr
     result_args.lr_scheduler = args.lr_scheduler
     result_args.lr_warmup_steps = args.lr_warmup_steps

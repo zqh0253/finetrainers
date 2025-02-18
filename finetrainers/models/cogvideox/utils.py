@@ -22,6 +22,7 @@ def prepare_rotary_positional_embeddings(
     base_size_width = base_width // (vae_scale_factor_spatial * patch_size)
     base_size_height = base_height // (vae_scale_factor_spatial * patch_size)
 
+    import pdb; pdb.set_trace()
     if patch_size_t is None:
         # CogVideoX 1.0
         grid_crops_coords = get_resize_crop_region_for_grid(

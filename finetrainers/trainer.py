@@ -1,6 +1,7 @@
 import json
 import logging
 import math
+import time
 import os
 import random
 from datetime import datetime, timedelta
@@ -37,9 +38,11 @@ from .constants import (
     PRECOMPUTED_CONDITIONS_DIR_NAME,
     PRECOMPUTED_DIR_NAME,
     PRECOMPUTED_LATENTS_DIR_NAME,
+    PRECOMPUTED_XYZ_LATENTS_DIR_NAME,
 )
 from .dataset import BucketSampler, ImageOrVideoDatasetWithResizing, PrecomputedDataset
 from .fake_dataset import FakeDataset
+from .megascenes import MegascenesDataset
 from .hooks import apply_layerwise_upcasting
 from .models import get_config_from_model_name
 from .patches import perform_peft_patches
@@ -127,6 +130,8 @@ class Trainer:
             )
         elif self.args.dataset_type == 'fake':
             self.dataset = FakeDataset()
+        elif self.args.dataset_type == 'megascenes':
+            self.dataset = MegascenesDataset(json_path=self.args.data_root)
         self.dataloader = torch.utils.data.DataLoader(
             self.dataset,
             batch_size=1,
@@ -172,26 +177,30 @@ class Trainer:
 
         def collate_fn(batch):
             latent_conditions = [x["latent_conditions"] for x in batch]
+            xyz_latent_conditions = [x["xyz_latent_conditions"] for x in batch]
             text_conditions = [x["text_conditions"] for x in batch]
             batched_latent_conditions = {}
+            batched_xyz_latent_conditions = {}
             batched_text_conditions = {}
             for key in list(latent_conditions[0].keys()):
                 if torch.is_tensor(latent_conditions[0][key]):
                     batched_latent_conditions[key] = torch.cat([x[key] for x in latent_conditions], dim=0)
+                    batched_xyz_latent_conditions[key] = torch.cat([x[key] for x in xyz_latent_conditions], dim=0)
                 else:
                     # TODO(aryan): implement batch sampler for precomputed latents
                     batched_latent_conditions[key] = [x[key] for x in latent_conditions][0]
+                    batched_xyz_latent_conditions[key] = [x[key] for x in xyz_latent_conditions][0]
             for key in list(text_conditions[0].keys()):
                 if torch.is_tensor(text_conditions[0][key]):
                     batched_text_conditions[key] = torch.cat([x[key] for x in text_conditions], dim=0)
                 else:
                     # TODO(aryan): implement batch sampler for precomputed latents
                     batched_text_conditions[key] = [x[key] for x in text_conditions][0]
-            return {"latent_conditions": batched_latent_conditions, "text_conditions": batched_text_conditions}
+            return {"latent_conditions": batched_latent_conditions, "xyz_latent_conditions": batched_xyz_latent_conditions, "text_conditions": batched_text_conditions}
 
         cleaned_model_id = string_to_filename(self.args.pretrained_model_name_or_path)
         precomputation_dir = (
-            Path(self.args.data_root) / f"{self.args.model_name}_{cleaned_model_id}_{PRECOMPUTED_DIR_NAME}"
+            Path('precompute') / f"{self.args.model_name}_{cleaned_model_id}_{PRECOMPUTED_DIR_NAME}"
         )
         should_precompute = should_perform_precomputation(precomputation_dir)
         if not should_precompute:
@@ -224,8 +233,10 @@ class Trainer:
 
         conditions_dir = precomputation_dir / PRECOMPUTED_CONDITIONS_DIR_NAME
         latents_dir = precomputation_dir / PRECOMPUTED_LATENTS_DIR_NAME
+        xyz_latents_dir = precomputation_dir / PRECOMPUTED_XYZ_LATENTS_DIR_NAME
         conditions_dir.mkdir(parents=True, exist_ok=True)
         latents_dir.mkdir(parents=True, exist_ok=True)
+        xyz_latents_dir.mkdir(parents=True, exist_ok=True)
 
         accelerator = self.state.accelerator
 
@@ -302,6 +313,18 @@ class Trainer:
             )
             filename = latents_dir / f"latents-{accelerator.process_index}-{index}.pt"
             torch.save(latent_conditions, filename.as_posix())
+
+            xyz_latent_conditions = self.model_config["prepare_latents"](
+                            vae=self.vae,
+                            image_or_video=data['xyz_img'].unsqueeze(0),
+                            device=accelerator.device,
+                            dtype=self.args.transformer_dtype,
+                            generator=self.state.generator,
+                            precompute=True
+            )
+            filename = xyz_latents_dir / f"latents-{accelerator.process_index}-{index}.pt"
+            torch.save(xyz_latent_conditions, filename.as_posix())
+
             index += 1
             progress_bar.update(1)
         self._delete_components()
@@ -643,9 +666,15 @@ class Trainer:
             epoch_loss = 0.0
             num_loss_updates = 0
 
+
+            t1 = time.time()
             for step, batch in enumerate(self.dataloader):
                 logger.debug(f"Starting step {step + 1}")
                 logs = {}
+
+                t2 = time.time()
+                data_time = t2 - t1
+                t1 = t2
 
                 with accelerator.accumulate(models_to_accumulate):
                     if not self.args.precompute_conditions:
@@ -658,10 +687,8 @@ class Trainer:
                             if random.random() < self.args.caption_dropout_p:
                                 prompts = [""] * batch_size
 
-                        src_videos = videos[:, 0:1]
-
-                        if random.random() < self.args.img_dropout_p:
-                            src_videos = src_videos * 0
+                        # if random.random() < self.args.img_dropout_p:
+                        #     src_videos = src_videos * 0
 
                         latent_conditions = self.model_config["prepare_latents"](
                             vae=self.vae,
@@ -681,16 +708,8 @@ class Trainer:
                             dtype=self.args.transformer_dtype,
                             generator=self.state.generator,
                         )
-                        src_latent_conditions = self.model_config["prepare_latents"](
-                            vae=self.vae,
-                            image_or_video=src_videos,
-                            patch_size=self.transformer_config.patch_size,
-                            patch_size_t=self.transformer_config.patch_size_t,
-                            device=accelerator.device,
-                            dtype=self.args.transformer_dtype,
-                            generator=self.state.generator,
-                        )
-                        # latent_conditions, xyz_latent_conditions, src_latent_conditions 
+                    
+                        # latent_conditions, xyz_latent_conditions
 
                         text_conditions = self.model_config["prepare_conditions"](
                             tokenizer=self.tokenizer,
@@ -703,9 +722,13 @@ class Trainer:
                         )
                     else:
                         latent_conditions = batch["latent_conditions"]
+                        xyz_latent_conditions = batch["xyz_latent_conditions"]
                         text_conditions = batch["text_conditions"]
                         latent_conditions["latents"] = DiagonalGaussianDistribution(
                             latent_conditions["latents"]
+                        ).sample(self.state.generator)
+                        xyz_latent_conditions["latents"] = DiagonalGaussianDistribution(
+                            xyz_latent_conditions["latents"]
                         ).sample(self.state.generator)
 
                         # This method should only be called for precomputed latents.
@@ -716,13 +739,25 @@ class Trainer:
                             patch_size_t=self.transformer_config.patch_size_t,
                             **latent_conditions,
                         )
+                        xyz_latent_conditions = self.model_config["post_latent_preparation"](
+                            vae_config=self.vae_config,
+                            patch_size=self.transformer_config.patch_size,
+                            patch_size_t=self.transformer_config.patch_size_t,
+                            **xyz_latent_conditions,
+                        )
                         align_device_and_dtype(latent_conditions, accelerator.device, self.args.transformer_dtype)
+                        align_device_and_dtype(xyz_latent_conditions, accelerator.device, self.args.transformer_dtype)
                         align_device_and_dtype(text_conditions, accelerator.device, self.args.transformer_dtype)
                         batch_size = latent_conditions["latents"].shape[0]
 
-                    latent_conditions["latents"] = torch.cat([latent_conditions["latents"], xyz_latent_conditions["latents"], src_latent_conditions["latents"]], 1)
+                    
+                    latent_conditions["latents"] = torch.cat([latent_conditions["latents"], xyz_latent_conditions["latents"]], 1)
                     latent_conditions = make_contiguous(latent_conditions)
                     text_conditions = make_contiguous(text_conditions)
+
+                    t2 = time.time()
+                    prepare_time = t2 - t1
+                    t1 = t2
 
                     if self.args.caption_dropout_technique == "zero":
                         if random.random() < self.args.caption_dropout_p:
@@ -748,7 +783,7 @@ class Trainer:
                     timesteps = (sigmas * 1000.0).long()
                     
                     mask = torch.zeros_like(latent_conditions["latents"])
-                    mask[:, -1] = 1
+                    # mask[:, -1] = 1
 
                     noise = torch.randn(
                         latent_conditions["latents"].shape,
@@ -803,6 +838,7 @@ class Trainer:
                     loss = loss.mean()
                     accelerator.backward(loss)
 
+
                     if accelerator.sync_gradients:
                         if accelerator.distributed_type == DistributedType.DEEPSPEED:
                             grad_norm = self.transformer.get_global_grad_norm()
@@ -818,9 +854,18 @@ class Trainer:
 
                         logs["grad_norm"] = grad_norm
 
+
+                    t2 = time.time()
+                    train_time = t2 - t1
+                    t1 = t2
+                    
                     self.optimizer.step()
                     self.lr_scheduler.step()
                     self.optimizer.zero_grad()
+
+                    t2 = time.time()
+                    optimizer_time = t2 - t1
+                    t1 = t2
 
                 # Checks if the accelerator has performed an optimization step behind the scenes
                 if accelerator.sync_gradients:
@@ -850,6 +895,10 @@ class Trainer:
                 num_loss_updates += 1
                 logs["step_loss"] = loss_item
                 logs["lr"] = self.lr_scheduler.get_last_lr()[0]
+                logs["data_time"] = data_time
+                logs["prepare_time"] = prepare_time
+                logs["train_time"] = train_time
+                logs["optimizer_time"] = optimizer_time
                 progress_bar.set_postfix(logs)
                 accelerator.log(logs, step=global_step)
 

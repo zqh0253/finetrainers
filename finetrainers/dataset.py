@@ -27,6 +27,7 @@ from .constants import (  # noqa
     PRECOMPUTED_CONDITIONS_DIR_NAME,
     PRECOMPUTED_DIR_NAME,
     PRECOMPUTED_LATENTS_DIR_NAME,
+    PRECOMPUTED_XYZ_LATENTS_DIR_NAME,
 )
 
 
@@ -356,19 +357,20 @@ class PrecomputedDataset(Dataset):
     def __init__(self, data_root: str, model_name: str = None, cleaned_model_id: str = None) -> None:
         super().__init__()
 
-        self.data_root = Path(data_root)
+        self.data_root = Path('precompute')
 
         if model_name and cleaned_model_id:
             precomputation_dir = self.data_root / f"{model_name}_{cleaned_model_id}_{PRECOMPUTED_DIR_NAME}"
             self.latents_path = precomputation_dir / PRECOMPUTED_LATENTS_DIR_NAME
             self.conditions_path = precomputation_dir / PRECOMPUTED_CONDITIONS_DIR_NAME
+            self.xyz_latents_path = precomputation_dir / PRECOMPUTED_XYZ_LATENTS_DIR_NAME
         else:
             self.latents_path = self.data_root / PRECOMPUTED_DIR_NAME / PRECOMPUTED_LATENTS_DIR_NAME
             self.conditions_path = self.data_root / PRECOMPUTED_DIR_NAME / PRECOMPUTED_CONDITIONS_DIR_NAME
-
+            self.xyz_latents_path = self.data_root / PRECOMPUTED_DIR_NAME / PRECOMPUTED_XYZ_LATENTS_DIR_NAME
         self.latent_conditions = sorted(os.listdir(self.latents_path))
         self.text_conditions = sorted(os.listdir(self.conditions_path))
-
+        self.xyz_latent_conditions = sorted(os.listdir(self.xyz_latents_path))
         assert len(self.latent_conditions) == len(self.text_conditions), "Number of captions and videos do not match"
 
     def __len__(self) -> int:
@@ -378,8 +380,10 @@ class PrecomputedDataset(Dataset):
         conditions = {}
         latent_path = self.latents_path / self.latent_conditions[index]
         condition_path = self.conditions_path / self.text_conditions[index]
+        xyz_latent_path = self.xyz_latents_path / self.xyz_latent_conditions[index]
         conditions["latent_conditions"] = torch.load(latent_path, map_location="cpu", weights_only=True)
         conditions["text_conditions"] = torch.load(condition_path, map_location="cpu", weights_only=True)
+        conditions["xyz_latent_conditions"] = torch.load(xyz_latent_path, map_location="cpu", weights_only=True)
         return conditions
 
 

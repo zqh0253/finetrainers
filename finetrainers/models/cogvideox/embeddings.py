@@ -643,7 +643,6 @@ class CogVideoXPatchEmbed(nn.Module):
         use_learned_positional_embeddings: bool = True,
     ) -> None:
         super().__init__()
-
         self.patch_size = patch_size
         self.patch_size_t = patch_size_t
         self.embed_dim = embed_dim
@@ -662,8 +661,12 @@ class CogVideoXPatchEmbed(nn.Module):
             self.proj = nn.Conv2d(
                 in_channels, embed_dim, kernel_size=(patch_size, patch_size), stride=patch_size, bias=bias
             )
+            self.proj_xyz = nn.Conv2d(
+                in_channels, embed_dim, kernel_size=(patch_size, patch_size), stride=patch_size, bias=bias
+            )
         else:
             # CogVideoX 1.5 checkpoints
+            assert False, "CogVideoX 1.5 checkpoints are not supported yet"
             self.proj = nn.Linear(in_channels * patch_size * patch_size * patch_size_t, embed_dim)
 
         self.text_proj = nn.Linear(text_embed_dim, embed_dim)
@@ -694,7 +697,7 @@ class CogVideoXPatchEmbed(nn.Module):
 
         return pos_embedding
 
-    def forward(self, text_embeds: torch.Tensor, image_embeds: torch.Tensor, real_num_frames=3):
+    def forward(self, text_embeds: torch.Tensor, image_embeds: torch.Tensor):
         r"""
         Args:
             text_embeds (`torch.Tensor`):
@@ -705,13 +708,18 @@ class CogVideoXPatchEmbed(nn.Module):
         text_embeds = self.text_proj(text_embeds)
 
         batch_size, num_frames, channels, height, width = image_embeds.shape
+        real_num_frames = num_frames // 2
 
         if self.patch_size_t is None:
-            image_embeds = image_embeds.reshape(-1, channels, height, width)
-            image_embeds = self.proj(image_embeds)
-            image_embeds = image_embeds.view(batch_size, num_frames, *image_embeds.shape[1:])
-            # rgb + xyz
-            image_embeds = image_embeds[:, :real_num_frames] + image_embeds[:, real_num_frames:2*real_num_frames] + image_embeds[:, 2*real_num_frames:]
+            image_embeds_rgb, image_embeds_xyz = torch.split(image_embeds, real_num_frames, dim=1)
+            image_embeds_rgb = image_embeds_rgb.reshape(-1, channels, height, width)
+            image_embeds_xyz = image_embeds_xyz.reshape(-1, channels, height, width)
+            image_embeds_rgb = self.proj(image_embeds_rgb)
+            image_embeds_xyz = self.proj_xyz(image_embeds_xyz)
+            image_embeds_rgb = image_embeds_rgb.view(batch_size, real_num_frames, *image_embeds_rgb.shape[1:])
+            image_embeds_xyz = image_embeds_xyz.view(batch_size, real_num_frames, *image_embeds_xyz.shape[1:])
+            image_embeds = image_embeds_rgb + image_embeds_xyz
+
             image_embeds = image_embeds.flatten(3).transpose(2, 3)  # [batch, num_frames, height x width, channels]
             image_embeds = image_embeds.flatten(1, 2)  # [batch, num_frames x height x width, channels]
         else:
