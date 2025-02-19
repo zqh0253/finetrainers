@@ -718,7 +718,7 @@ class CogVideoXPatchEmbed(nn.Module):
             image_embeds_xyz = self.proj_xyz(image_embeds_xyz)
             image_embeds_rgb = image_embeds_rgb.view(batch_size, real_num_frames, *image_embeds_rgb.shape[1:])
             image_embeds_xyz = image_embeds_xyz.view(batch_size, real_num_frames, *image_embeds_xyz.shape[1:])
-            image_embeds = image_embeds_rgb + image_embeds_xyz
+            image_embeds = (image_embeds_rgb + image_embeds_xyz) / 2
 
             image_embeds = image_embeds.flatten(3).transpose(2, 3)  # [batch, num_frames, height x width, channels]
             image_embeds = image_embeds.flatten(1, 2)  # [batch, num_frames x height x width, channels]

@@ -4,7 +4,7 @@ from finetrainers.models.cogvideox.cogvideox_pipeline import CogVideoXPipeline_v
 from diffusers.utils import export_to_video
 
 transformer = CogVideoXTransformer3DModel.from_pretrained(
-    "debug_ckpt_rgbxyz/checkpoint-500/transformer", torch_dtype=torch.bfloat16
+    "debug_ckpt_rgbrgb/checkpoint-15900/transformer", torch_dtype=torch.bfloat16
 )
 pipe = CogVideoXPipeline_vdm.from_pretrained("THUDM/CogVideoX-2b", transformer=transformer, torch_dtype=torch.bfloat16)
 # pipe = CogVideoXPipeline_vdm.from_pretrained("THUDM/CogVideoX-2b", torch_dtype=torch.bfloat16)

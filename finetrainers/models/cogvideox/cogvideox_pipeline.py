@@ -202,6 +202,7 @@ class CogVideoXPipeline_vdm(CogVideoXPipeline):
             generator,
             latents,
         )
+
         latents_xyz = self.prepare_latents(
             batch_size * num_videos_per_prompt,
             latent_channels,
