@@ -84,8 +84,7 @@ class MegascenesDataset(Dataset):
 
         # tmp 
         img = img[0:1].repeat(self.view_num, 1, 1, 1)
-        # xyz_img = xyz_img[0:1].repeat(self.view_num, 1, 1, 1)
-        xyz_img = img.clone()
+        xyz_img = xyz_img[0:1].repeat(self.view_num, 1, 1, 1)
 
         prompt = description
 

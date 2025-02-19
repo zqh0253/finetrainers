@@ -8,7 +8,7 @@ export FINETRAINERS_LOG_LEVEL=DEBUG
 DATA_ROOT="/home/qihang/data/megascenes_label/infos.json"
 CAPTION_COLUMN="prompt.txt"
 VIDEO_COLUMN="videos.txt"
-OUTPUT_DIR="debug_ckpt_rgbrgb"
+OUTPUT_DIR="debug_ckpt_rgbxyz"
 ID_TOKEN="BW_STYLE"
 
 # Model arguments
@@ -21,7 +21,7 @@ dataset_cmd="--data_root $DATA_ROOT \
   --caption_column $CAPTION_COLUMN \
   --id_token $ID_TOKEN \
   --video_resolution_buckets 9x256x256 \
-  --caption_dropout_p 1 \
+  --caption_dropout_p 0.1 \
   --img_dropout_p 0.1 \
   --dataset_type megascenes"
  
@@ -30,11 +30,11 @@ dataset_cmd="--data_root $DATA_ROOT \
 dataloader_cmd="--dataloader_num_workers 4"
 
 # Training arguments
-  # --precompute_conditions \
   #   --gradient_checkpointing \
 training_cmd="--training_type  full-finetune\
   --seed 42 \
-  --batch_size 8 \
+  --precompute_conditions \
+  --batch_size 1 \
   --train_steps 100000 \
   --gradient_accumulation_steps 1 \
   --checkpointing_steps 500 \
@@ -46,13 +46,13 @@ training_cmd="--training_type  full-finetune\
 # Optimizer arguments
 optimizer_cmd="--optimizer adamw \
   --use_8bit_bnb \
-  --lr 3e-4 \
+  --lr 3e-5 \
   --lr_scheduler constant_with_warmup \
   --lr_warmup_steps 100 \
   --lr_num_cycles 1 \
   --beta1 0.9 \
   --beta2 0.95 \
-  --weight_decay 0 \
+  --weight_decay 0.1 \
   --epsilon 1e-8 \
   --max_grad_norm 1.0"
 
