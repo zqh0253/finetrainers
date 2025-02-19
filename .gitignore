@@ -1,3 +1,11 @@
+inference.py
+*.mp4
+*.html
+precompute/
+debug*
+
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
