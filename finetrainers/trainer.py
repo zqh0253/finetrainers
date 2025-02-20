@@ -690,6 +690,11 @@ class Trainer:
                         # if random.random() < self.args.img_dropout_p:
                         #     src_videos = src_videos * 0
 
+                        # split the video frames
+                        B, T, C, H, W = videos.shape
+                        videos = videos.view(B*T, 1, C, H, W)
+                        xyz_videos = xyz_videos.view(B*T, 1, C, H, W)
+
                         latent_conditions = self.model_config["prepare_latents"](
                             vae=self.vae,
                             image_or_video=videos,
@@ -708,6 +713,10 @@ class Trainer:
                             dtype=self.args.transformer_dtype,
                             generator=self.state.generator,
                         )
+
+                        _, _, C, H, W = latent_conditions["latents"].shape
+                        latent_conditions["latents"] = latent_conditions["latents"].view(B, T, C, H, W)
+                        xyz_latent_conditions["latents"] = xyz_latent_conditions["latents"].view(B, T, C, H, W)
                     
                         # latent_conditions, xyz_latent_conditions
 
@@ -750,7 +759,6 @@ class Trainer:
                         align_device_and_dtype(text_conditions, accelerator.device, self.args.transformer_dtype)
                         batch_size = latent_conditions["latents"].shape[0]
 
-                    
                     latent_conditions["latents"] = torch.cat([latent_conditions["latents"], xyz_latent_conditions["latents"]], 1)
                     latent_conditions = make_contiguous(latent_conditions)
                     text_conditions = make_contiguous(text_conditions)

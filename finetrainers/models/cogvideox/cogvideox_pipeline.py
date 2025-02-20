@@ -7,6 +7,7 @@ from diffusers import CogVideoXPipeline
 from diffusers.pipelines.cogvideo.pipeline_cogvideox import CogVideoXPipelineOutput
 from diffusers.pipelines.cogvideo.pipeline_cogvideox import retrieve_timesteps
 from diffusers.schedulers import CogVideoXDDIMScheduler, CogVideoXDPMScheduler
+from diffusers.utils.torch_utils import randn_tensor
 
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
@@ -16,6 +17,50 @@ else:
     XLA_AVAILABLE = False
 
 class CogVideoXPipeline_vdm(CogVideoXPipeline):
+    def prepare_latents(
+        self, batch_size, num_channels_latents, num_frames, height, width, dtype, device, generator, latents=None, separate_latents=False
+    ):
+        if isinstance(generator, list) and len(generator) != batch_size:
+            raise ValueError(
+                f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
+                f" size of {batch_size}. Make sure the batch size matches the length of the generators."
+            )
+
+        actual_num_frames = num_frames if separate_latents else (num_frames - 1) // self.vae_scale_factor_temporal + 1
+
+        shape = (
+            batch_size,
+            actual_num_frames,
+            num_channels_latents,
+            height // self.vae_scale_factor_spatial,
+            width // self.vae_scale_factor_spatial,
+        )
+
+        if latents is None:
+            latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+        else:
+            latents = latents.to(device)
+
+        # scale the initial noise by the standard deviation required by the scheduler
+        latents = latents * self.scheduler.init_noise_sigma
+        return latents
+
+    def decode_latents(self, latents: torch.Tensor, separate_latents: bool = False) -> torch.Tensor:
+        B, T, C, H, W = latents.shape
+        if separate_latents:
+            latents = latents.view(B * T, 1, C, H, W)
+
+        latents = latents.permute(0, 2, 1, 3, 4)  # [batch_size, num_channels, num_frames, height, width]
+        
+        latents = 1 / self.vae_scaling_factor_image * latents
+
+        frames = self.vae.decode(latents).sample
+
+        if separate_latents:
+            _, C, _, H, W = frames.shape
+            frames = frames.view(B, C, T, H, W)
+        return frames
+
     @torch.no_grad()
     def __call__(
         self,
@@ -42,6 +87,7 @@ class CogVideoXPipeline_vdm(CogVideoXPipeline):
         ] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         max_sequence_length: int = 226,
+        separate_latents: bool = False,
     ) -> Union[CogVideoXPipelineOutput, Tuple]:
         """
         Function invoked when calling the pipeline for generation.
@@ -201,6 +247,7 @@ class CogVideoXPipeline_vdm(CogVideoXPipeline):
             device,
             generator,
             latents,
+            separate_latents=separate_latents,
         )
 
         latents_xyz = self.prepare_latents(
@@ -213,6 +260,7 @@ class CogVideoXPipeline_vdm(CogVideoXPipeline):
             device,
             generator,
             latents,
+            separate_latents=separate_latents,
         )
         latents = torch.cat([latents_rgb, latents_xyz], dim=1)
 
@@ -301,8 +349,8 @@ class CogVideoXPipeline_vdm(CogVideoXPipeline):
             # Discard any padding frames that were added for CogVideoX 1.5
             latents = latents[:, additional_frames:]
             latents_rgb, latents_xyz = torch.split(latents, [latents.shape[1] // 2, latents.shape[1] // 2], dim=1)
-            video_rgb = self.decode_latents(latents_rgb)
-            video_xyz = self.decode_latents(latents_xyz)
+            video_rgb = self.decode_latents(latents_rgb, separate_latents=separate_latents)
+            video_xyz = self.decode_latents(latents_xyz, separate_latents=separate_latents)
             video = torch.cat([video_rgb, video_xyz], dim=2)
             video = self.video_processor.postprocess_video(video=video, output_type=output_type)
         else:
