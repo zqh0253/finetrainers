@@ -71,15 +71,20 @@ if __name__ == "__main__":
 
     new_infos = []
     with torch.no_grad():
-        for scene in tqdm.tqdm(data):    
+        for scene in tqdm.tqdm(data):  
+            scene_infos = []  
             for rgb_path, mask_path, xyz_path, orientation, description, c2w, K, scale in scene:
                 rgb = np.array(load_image(rgb_path))
+                if rgb.ndim == 2:
+                    rgb = np.stack([rgb, rgb, rgb], axis=2)
+                elif rgb.ndim == 3 and rgb.shape[2] == 4:
+                    rgb = rgb[:, :, :3]
                 mask = np.array(load_image(mask_path))
                 xyz = np.clip(load_np(xyz_path), 0, 1)
 
                 h, w, _ = rgb.shape
                 new_h, new_w = h // args.downsample_factor, w // args.downsample_factor
-                new_h, new_w = round(new_h / 8) * 8, round(new_w / 8) * 8
+                new_h, new_w = round(new_h / 16) * 16, round(new_w / 16) * 16
                 K[0] = K[0] * new_w / w
                 K[2] = K[2] * new_w / w
                 K[4] = K[4] * new_h / h
@@ -93,14 +98,13 @@ if __name__ == "__main__":
                 xyz[mask<=0] = 0
                 xyz = torch.from_numpy(xyz).permute(2, 0, 1) / 255 * 2 - 1
                 xyz = xyz[None, :, None].cuda()
-                xyz_latents = get_vae_latents(model, xyz, "cuda")
+                xyz_latents = get_vae_latents(model, xyz, "cuda").cpu()
                 
                 rgb = torch.from_numpy(rgb).permute(2, 0, 1) / 255 * 2 - 1
                 rgb = rgb[None, :, None].cuda()
-                rgb_latents = get_vae_latents(model, rgb, "cuda")
+                rgb_latents = get_vae_latents(model, rgb, "cuda").cpu()
 
-                text_conditions = get_text_conditions(description, model.tokenizer, model.text_encoder, "cuda", torch.bfloat16)
-
+                text_conditions = get_text_conditions(description, model.tokenizer, model.text_encoder, "cuda", torch.bfloat16)['prompt_embeds'].cpu()
                 folder_name = rgb_path.replace('/', '-').replace(' ', '_')
                 rgb_latents_path = os.path.join(args.output_dir, 'latents', folder_name, "rgb_latents.pt")
                 xyz_latents_path = os.path.join(args.output_dir, 'latents', folder_name, "xyz_latents.pt")
@@ -118,7 +122,8 @@ if __name__ == "__main__":
                     rgb_path, mask_path, xyz_path, orientation, description, c2w, K, scale,
                     rgb_latents_path, xyz_latents_path, text_conditions_path
                 ]
-                new_infos.append(infos)
+                scene_infos.append(infos)
+            new_infos.append(scene_infos)
 
     with open(os.path.join(args.output_dir, "precomputed_infos.json"), "w") as f:
         json.dump(new_infos, f)
