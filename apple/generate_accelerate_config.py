@@ -17,7 +17,6 @@ except:
     main_task = my_task
     gpus = [main_task.resources.num_gpus]
 
-
 config = {
     'compute_environment': 'LOCAL_MACHINE',
     'distributed_type': 'MULTI_GPU',

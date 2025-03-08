@@ -5,7 +5,7 @@ export TORCH_NCCL_ENABLE_MONITORING=0
 export FINETRAINERS_LOG_LEVEL=DEBUG
 
 
-DATA_ROOT=""
+DATA_ROOT="video-dataset-disney/videos"
 CAPTION_COLUMN="prompt.txt"
 VIDEO_COLUMN="videos.txt"
 OUTPUT_DIR="debug_ckpt"

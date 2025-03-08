@@ -24,7 +24,7 @@ class FakeDataset(Dataset):
         self.view_num = view_num
         self.random_mask_xyz = random_mask_xyz
 
-        self.path = '/mnt/petrelfs/liangzhengyang.d/qh_projects/T2I/re10k/'
+        self.path = 'data/'
         self.num_samples = len(os.listdir(self.path))
 
         self.resolution_buckets = [(9, 256, 256)]
@@ -104,5 +104,9 @@ class FakeDataset(Dataset):
         return dict(video=img, xyz_img=xyz_img, prompt="",
                     video_metadata=dict(num_frames=img.shape[0], height=img.shape[2], width=img.shape[3]),
                     # above terms are necessary.
-                    ray_map=ray_map, caption=caption, tokens=tokens, timestep=torch.tensor(idx), time_idxs=torch.tensor(idx), intrinsic=intrinsic, w2c=w2c, H=H, W=W,
+                    ray_map=ray_map, caption=caption, tokens=tokens, 
+                    timestep=torch.tensor(idx), time_idxs=torch.tensor(idx), 
+                    intrinsic=intrinsic, w2c=w2c, H=H, W=W,
                     mask=mask, mask_idx=mask_idx, raw_xyz = raw_xyz)
+
+

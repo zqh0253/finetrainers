@@ -13,18 +13,23 @@ import click
 @click.option('--tags', default=None)
 @click.option('--interactive', default=False)
 @click.option('--run', default=None)
-def main(name, config, ngpu, days, tags, run, interactive):
+@click.option('--wandb_key', default=None)
+def main(name, config, ngpu, days, tags, run, interactive, wandb_key):
     with open(config) as file:
         config = yaml.load(file, Loader=yaml.FullLoader)
     if name is not None:
         config['name'] = name
+    if 'num_nodes' in config['resources']:
+        num_nodes = config['resources']['num_nodes']
+    else:
+        num_nodes = 1
     config['resources']['num_gpus'] = ngpu
     config['resources']['timeout'] = f'{days}d'
     if tags is not None:
         for c in tags.split(','):
             config['tags'].append(c)
     if run is not None:
-        config['command'] = f"bash {run} {ngpu} {name}" # assuming scripts accepts #GPUs and name
+        config['command'] = f"bash apple/lunch.sh {run} {ngpu * num_nodes}" # assuming scripts accepts #GPUs and name
 
     config['attribution']['project'] = config['name']
     config['attribution']['fm_development_type'] = "training"
@@ -51,6 +56,11 @@ def main(name, config, ngpu, days, tags, run, interactive):
     else:
         raise NotImplementedError(f"Cluster {cluster} not supported")
 
+    
+    if wandb_key is not None:
+        config['environment_variables']['WANDB_API_KEY'] = wandb_key
+
+    config['environment_variables']['EXPERIMENT_NAME'] = config['name']
     # submit
     bolt.submit(config, tar='.', interactive=interactive)
 

@@ -1,4 +1,4 @@
-name: 'interactive debug WVD2'
+name: 'interactive debug 1D tokenization'
 setup_command: ''
 command: 'bash'
 permissions:

@@ -1,6 +1,6 @@
-name: 'blur-blur-debug-V6'
+name: 'diffusion-noise-diffusion-noise-realV4'
 setup_command: 'bash apple/setup_env.sh'
-command: 'bash apple/launch.sh configs/training/Mtok/mtok_conv_bl_vq.yaml 8'
+command: 'bash apple/launch.sh configs/training/Mtok/difftok_conv_noise_fsq.yaml 32'
 tags: ['mTok']
 permissions:
   viewers: mlr
@@ -9,6 +9,8 @@ resources:
   cluster: aws_5
   task_type: 8gpu
   memory_gb: 545
+  num_nodes: 4
+  num_gpus: 8
   num_cpus: 48
   disk_gb: 1024
   docker_image: docker.apple.com/iris/iris:2.17.0
@@ -17,7 +19,7 @@ resources:
 attribution:
     project: Text2Image_Diffusion
     foundation_model: false
-    model_size: 500mb
+    model_size: 1500mb
     spend: dev
     development_type: training
 

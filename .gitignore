@@ -173,3 +173,5 @@ outputs*
 .vscode/
 
 !requirements.txt
+video-dataset-disney
+data/

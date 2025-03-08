@@ -1,11 +1,12 @@
-name: 'Test Multi-node training'
+name: 'diffusion-noise-noise-real-nomask'
 setup_command: 'bash apple/setup_env.sh'
-command: 'bash apple/launch.sh configs/training/Mtok/mtok_bl_vq.yaml'
+command: 'bash apple/launch.sh configs/training/Mtok/mtok_conv_diff_noise_vq.yaml 16'
+tags: ['mTok']
 permissions:
   viewers: mlr
 project_id: mlr_jgu32
 resources:
-  cluster: aws_2
+  cluster: aws_5
   task_type: 8gpu
   memory_gb: 545
   num_nodes: 2
@@ -14,7 +15,7 @@ resources:
   disk_gb: 1024
   docker_image: docker.apple.com/iris/iris:2.17.0
   ports: ['NOTEBOOK_PORT', 'TENSORBOARD_PORT']
-  timeout: 1d
+  timeout: 14d
 attribution:
     project: Text2Image_Diffusion
     foundation_model: false
