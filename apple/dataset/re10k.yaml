@@ -1,0 +1,8 @@
+train:
+  files:
+    - s3://aws-qihang-1/re10k_rgbxyz_samefocal_2/jsons/info_(?!511(?:\.json|$))\d{1,3}\.json
+  endpoint_url: https://conductor.data.apple.com
+eval:
+  files:
+    - s3://aws-qihang-1/re10k_rgbxyz_test/jsons/info_511.json
+  endpoint_url: https://conductor.data.apple.com

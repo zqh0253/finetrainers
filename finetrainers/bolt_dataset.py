@@ -21,7 +21,7 @@ from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms.functional as F
 from torchvision import transforms
-from distributed import get_rank
+from .distributed import get_rank
 os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
 import cv2
 from io import BytesIO
@@ -81,6 +81,7 @@ class InfiniteDataLoader(torch.utils.data.DataLoader):
 class DataLoaderWrapper(InfiniteDataLoader):
     def __iter__(self):
         return IterWrapper(super().__iter__())
+
 
 class IterWrapper:
     def __init__(self, obj):
@@ -239,7 +240,7 @@ def label_to_camera(dataset_name, label):
     return intrinsic, w2c
 
 
-class MultiViewDataset(Dataset):
+class MultiViewXYZDataset(Dataset):
     if not NO_BOTO:
         # create conductor session
         retry_config = Config(
@@ -270,6 +271,9 @@ class MultiViewDataset(Dataset):
         self.color_aug = color_aug
         self.random_mask_xyz = random_mask_xyz
         self.project_camera = project_camera
+
+        self.resolution_buckets = [(view_num, image_size, image_size)]
+
         seed = 1234 + get_rank()
         self.rng = np.random.default_rng(seed)
 
@@ -307,82 +311,6 @@ class MultiViewDataset(Dataset):
     def __len__(self):
         return len(self.seq_names)
 
-    def __getitem__(self, idx):
-        seq_name = self.seq_names[idx]
-        info = self.info[seq_name]
-        dataset_name = info['meta']['dataset_name']
-
-        # download sequence tar
-        i = 0
-        while 1:
-            if i == self.max_retry_n:            
-                print('FAIL:', f'{dataset_name}/{seq_name}.tar', flush=True)
-                raise ValueError
-
-            try:
-                file_stream = io.BytesIO()
-                self.conductor.download_fileobj('aws-qihang-1', f'{dataset_name}/{seq_name}.tar', file_stream, Config=self.transfer_config)
-                file_stream.seek(0)
-                tar = tarfile.open(fileobj=io.BytesIO(file_stream.read()), mode='r')
-                break
-            except:
-                i += 1
-                pass
-            
-        n_view = info['meta']['n_views'] if 'n_views' in info['meta'] else len(info['views'])
-        if self.view_num == -1:
-            start, end = 0, n_view
-            idx = list(range(start, end, self.interval))
-        else:
-            if not self.consecutive_idx:
-                idx = random.sample(range(n_view), self.view_num)
-            else:
-                max_interval = min(self.interval, (n_view - 1) // (self.view_num-1))
-                interval = self.rng.integers(1, max_interval+1)
-                start = self.rng.integers(0, n_view - (self.view_num - 1) * interval)
-                end = start + (self.view_num - 1) * interval
-                
-                # idx = list(range(start, end+1, interval))
-                idx = [start + _ * interval for _ in range(self.view_num)]
-
-        keys = list(info['views'].keys())
-        keys = sorted(keys, key=lambda x:int(x.split('.')[0]))
-        names = [keys[_] for _ in idx]
-        raw_img = [Image.open(tar.extractfile(name)) for name in names]
-        width, height = raw_img[0].size
-        img = [self.transform(_.convert('RGB')) for _ in raw_img]
-        img = np.concatenate([np.array(_)[None] for _ in img], 0)
-
-        if 'meta' in info.keys():
-            meta = info['meta']
-            
-        if 'views' in info.keys() and info['views'] is not None:
-            view_num = self.view_num if self.view_num !=-1 else 8
-            mask_idx = np.random.choice(view_num, size=1, replace=False)
-            mask = np.zeros([view_num])
-            mask[mask_idx] = 1
-
-            labels = info['views']    
-            label = [labels[name] for name in names]
-            label = np.array(label)
-            intrinsic, w2c = label_to_camera(dataset_name, label)
-            factor = find_max_scale_factor(height, width) 
-            H, W = height // factor, width // factor
-            ray_map = _get_plucker_embedding(intrinsic, w2c, H, W, norm_t=self.norm_t, mask_idx=mask_idx)
-            ray_map = torch.from_numpy(ray_map).permute(0, 3, 1, 2)
-            ray_map = F.resize(transforms.CenterCrop(min(H, W))(ray_map), 32).permute(0, 2, 3, 1)
-        else:
-            intrinsic = w2c = H = W = ray_map = 0
-        caption = np.zeros([234])
-        tokens = np.zeros([47])
-
-        return dict(image=img, ray_map=ray_map, caption=caption, tokens=tokens, 
-                    timestep=torch.tensor(idx), idxs=torch.tensor(idx), 
-                    intrinsic=intrinsic, w2c=w2c, H=H, W=W, 
-                    mask=mask, mask_idx=mask_idx)
-
-
-class MultiViewXYZDataset(MultiViewDataset):
     def __getitem__(self, index):
         seq_name = self.seq_names[index]
         info = self.info[seq_name]
@@ -420,7 +348,7 @@ class MultiViewXYZDataset(MultiViewDataset):
                 
                 else:
                     max_interval = min(self.interval, (n_view - 1) // (self.view_num-1))
-                    interval = self.rng.integers(2, max_interval // ratio + 1)
+                    interval = self.rng.integers(1, max_interval // ratio + 1)
                 fps = 30 / float(interval * ratio)
                 start = self.rng.integers(0, n_view - (self.view_num - 1) * interval)
                 end = start + (self.view_num - 1) * interval
@@ -436,7 +364,7 @@ class MultiViewXYZDataset(MultiViewDataset):
         except:
             print('info:', dataset_name, seq_name, names, flush=True)
             assert 1== 0
-        width, height = raw_img[0].size
+
         img = [self.transform(_.convert('RGB')) for _ in raw_img]
         img = np.stack(img, 0)
 
@@ -480,8 +408,6 @@ class MultiViewXYZDataset(MultiViewDataset):
             l, r = np.quantile(xyz_img, 0.02), np.quantile(xyz_img, 0.98)
             xyz_img = np.clip(xyz_img, l, r)
             xyz_img = (xyz_img - l) / (r - l + 1e-5)
-            
-            xyz_sss = xyz_img 
             xyz_img = xyz_img * 255
             xyz_img = xyz_img.astype(np.uint8).transpose([0, 2, 3, 1])[..., :3]
             
@@ -529,195 +455,27 @@ class MultiViewXYZDataset(MultiViewDataset):
         else:
             intrinsic = w2c = H = W = ray_map = 0
         
-        caption = np.zeros([234])
-        tokens = np.zeros([47])
-        # tokens[0] = 1
         idx = [cnt for cnt, each in enumerate(idx)]
         return dict(
-            image=img, ray_map=ray_map, caption=caption, tokens=tokens, 
+            videos=img, xyz_videos=xyz_img, ray_map=ray_map, prompts="",
+            video_metadata=dict(num_frames=img.shape[0], height=img.shape[1], width=img.shape[2]), 
             timestep=torch.tensor(idx), time_idxs=torch.tensor(idx),
             fps=torch.tensor([fps]),
             intrinsic=intrinsic, w2c=w2c, H=H, W=W, 
-            mask=mask, mask_idx=mask_idx, xyz_img=xyz_img)
-
-
-class FakeDataset(Dataset):
-    def __init__(self, dataset_name, interval=1, image_size=256, view_num=4, cache_dir='/mnt/dataset_cache', file_name='infos_train_0.json', fix_interval=False, consecutive_idx=True, norm_t=False, shuffle=True, color_aug=False, random_mask_xyz=False):
-        self.view_num = view_num
-        self.random_mask_xyz = random_mask_xyz
-       
-    def __len__(self):
-        return 1000
-
-    def __getitem__(self, idx):
-        xyz_img = img = np.zeros([self.view_num, 256, 256, 3])
-        ray_map = np.zeros([self.view_num,32,32, 3])
-        caption = np.zeros([234])
-        tokens = np.zeros([47])
-        idx = np.arange(self.view_num)
-        intrinsic = np.ones([self.view_num, 4])
-        w2c = np.stack( [np.eye(4)] * self.view_num)
-        H = W = 256
-        view_num = self.view_num if self.view_num !=-1 else 8
-        if self.random_mask_xyz:
-            mask_idx = np.random.choice(view_num * 2, size=1, replace=False)
-        else:
-            mask_idx = np.random.choice(view_num, size=1, replace=False)
-        mask = np.zeros([view_num * 2])
-        mask[mask_idx] = 1
-        
-        return dict(image=img, ray_map=ray_map, caption=caption, tokens=tokens, timestep=torch.tensor(idx), time_idxs=torch.tensor(idx), intrinsic=intrinsic, w2c=w2c, H=H, W=W, 
-                    mask=mask, mask_idx=mask_idx, xyz_img=xyz_img)
-
-
-class MultiViewDepthDataset(MultiViewDataset):
-    def __getitem__(self, idx):
-        seq_name = self.seq_names[idx]
-        info = self.info[seq_name]
-        dataset_name = info['meta']['dataset_name']
-
-        # download sequence tar
-        i = 0
-        while 1:
-            if i == self.max_retry_n:            
-                print('FAIL:', f'{dataset_name}/{seq_name}.tar', flush=True)
-                raise ValueError
-
-            try:
-                file_stream = io.BytesIO()
-                self.conductor.download_fileobj('aws-qihang-1', f'{dataset_name}/{seq_name}.tar', file_stream, Config=self.transfer_config)
-                file_stream.seek(0)
-                tar = tarfile.open(fileobj=io.BytesIO(file_stream.read()), mode='r')
-                break
-            except:
-                i += 1
-                pass
-            
-        n_view = info['meta']['n_views'] if 'n_views' in info['meta'] else len(info['views'])
-        if self.view_num == -1:
-            start, end = 0, n_view
-            idx = list(range(start, end, self.interval))
-        else:
-            if not self.consecutive_idx:
-                idx = random.sample(range(n_view), self.view_num)
-            else:
-                max_interval = min(self.interval, (n_view - 1) // (self.view_num-1))
-                interval = random.randint(0, max_interval)
-                start = random.randint(0, n_view - (self.view_num - 1) * interval - 1)
-                end = start + (self.view_num - 1) * interval
-                
-                # idx = list(range(start, end+1, interval))
-                idx = [start + _ * interval for _ in range(self.view_num)]
-
-        keys = list(info['views'].keys())
-        keys = sorted(keys, key=lambda x:int(x.split('.')[0]))
-        names = [keys[_] for _ in idx]
-        raw_img = [Image.open(tar.extractfile(name)) for name in names]
-        width, height = raw_img[0].size
-        img = [self.transform(_.convert('RGB')) for _ in raw_img]
-        img = np.concatenate([np.array(_)[None] for _ in img], 0)
-
-        if dataset_name == 'gobj_rawtar':
-            keys = list(info['views'].keys())
-            keys = sorted(keys, key=lambda x:int(x.split('.')[0]))
-            names = [keys[_] for _ in idx]
-            depth_names = [each[:-10]+'nd.exr' for each in names] 
-            raw_depth = [self.depth_transformimp(torch.from_numpy(cv2.imdecode((
-                get_np_array_from_tar_object(tar.extractfile(name))
-            ), cv2.IMREAD_UNCHANGED)).permute(2, 0, 1)) for name in depth_names]
-            raw_depth = np.concatenate([np.array(_)[None] for _ in raw_depth], 0)
-
-        if 'meta' in info.keys():
-            meta = info['meta']
-            
-        if 'views' in info.keys() and info['views'] is not None:
-            view_num = self.view_num if self.view_num !=-1 else 8
-            mask_idx = np.random.choice(view_num, size=1, replace=False)
-            mask = np.zeros([view_num])
-            mask[mask_idx] = 1
-
-            labels = info['views']    
-            label = [labels[name] for name in names]
-            label = np.array(label)
-            intrinsic, w2c = label_to_camera(dataset_name, label)
-            factor = find_max_scale_factor(height, width) 
-            H, W = height // factor, width // factor
-            ray_map = _get_plucker_embedding(intrinsic, w2c, H, W, norm_t=self.norm_t, mask_idx=mask_idx)
-            ray_map = torch.from_numpy(ray_map).permute(0, 3, 1, 2)
-            ray_map = F.resize(transforms.CenterCrop(min(H, W))(ray_map), 32).permute(0, 2, 3, 1)
-
-            # XYZ maps
-            height, width = img.shape[1:3]
-            ys, xs = np.meshgrid(
-            np.linspace(0, height - 1, height, dtype=w2c.dtype),
-            np.linspace(0, width - 1, width, dtype=w2c.dtype), indexing='ij')
-            ys = np.tile(ys.reshape([1, height * width]), [view_num, 1])  +0.5
-            xs = np.tile(xs.reshape([1, height * width]), [view_num, 1])  +0.5
-
-            fx, fy, cx, cy = np.split(intrinsic, 4, -1)
-            fx, fy, cx, cy = fx * width, fy * height, cx * width, cy * height
-
-            zs_cam = np.ones_like(xs)
-            xs_cam = (xs - cx) / fx * zs_cam
-            ys_cam = (ys - cy) / fy * zs_cam
-            # import pdb;pdb.set_trace()
-            directions = np.stack((xs_cam, ys_cam, zs_cam), -1)
-            views = []
-            for view_idx in range(self.view_num):
-                depth = raw_depth[view_idx][-1]
-                fg = cv2.blur((depth > 0).astype(float), (5, 5)) == 1
-                depth = depth.reshape(-1, 1)
-                fg = fg.reshape(-1)
-                intrinsic_i = intrinsic[view_idx]
-                w2c_i = w2c[view_idx]
-                # normalize to the mask view
-                norm_w2c = np.eye(4)
-                norm_w2c[:3, :3] = w2c[mask_idx[0]][:3, :3]
-                c2w_i = norm_w2c @ np.linalg.inv(w2c_i)
-
-                pts = directions[view_idx]
-                pts = pts * depth
-                
-                pts = np.concatenate([pts, np.ones([pts.shape[0], 1])], 1)
-                pts = np.einsum('ab,nb->na', c2w_i, pts)
-
-                # transfer to image space
-                image_pts = pts.copy()
-                image_pts[~fg] = 0
-                print(fg.shape, img.shape)
-                image_pts = image_pts.reshape(256, 256, 4)
-                views.append(image_pts)
-            xyz_img = np.stack(views)
-            _mask = xyz_img[..., -1] != 0
-            try:
-                l, r = xyz_img[_mask].min(), xyz_img[_mask].max()
-            except:
-                l, r = 1, 1
-                print('ERROR:', xyz_img.shape, f'{dataset_name}/{seq_name}.tar', names, flush=True)
-            xyz_img = (xyz_img - l) / (r - l) * 255
-            xyz_img[~_mask] = 255
-            img[~_mask] = 255
-            xyz_img = xyz_img.astype(np.uint8)[..., :3]
-        else:
-            intrinsic = w2c = H = W = ray_map = 0
-        caption = np.zeros([234])
-        tokens = np.zeros([47])
-
-        return dict(image=img, ray_map=ray_map, caption=caption, tokens=tokens, timestep=torch.tensor(idx), idxs=torch.tensor(idx), intrinsic=intrinsic, w2c=w2c, H=H, W=W, 
-                    mask=mask, mask_idx=mask_idx, raw_depth=raw_depth, xyz_img=xyz_img, fg_mask=_mask)
+            mask=mask, mask_idx=mask_idx)
 
     
 if __name__ == '__main__':
     import time
     from nerfvis import scene
     from utils.vis import HtmlPageVisualizer
-    import psutil
     from tqdm import trange
     import open3d as o3d
 
     # test RealEstate10K
     # dataset = MultiViewDataset('RealEstate10K')
-    dataset = MultiViewXYZDataset('f', file_name='infos_train_0.json', interval=2, fix_interval=True,  view_num=12)
+    dataset = MultiViewXYZDataset('f', file_name='infos_train_0.json', interval=2, fix_interval=False,  view_num=21)
+    import pdb;pdb.set_trace()
     N = 10
     page = HtmlPageVisualizer(num_rows=N*4, num_cols=12)
 
@@ -737,6 +495,7 @@ if __name__ == '__main__':
             page.set_cell(4*i+2, j, image=data['xyz_img'][j])
             noisy_xyz = np.clip((data['xyz_img'][j] + np.random.randn(256, 256, 3) * 40), 0, 255).astype(np.uint8)
             page.set_cell(4*i+3, j, image=noisy_xyz)
+        
         for j in range(data['xyz_img'].shape[0]):
             scene.add_points(f"points/{i}/{j}", data['xyz_img'][j].reshape(-1, 3), vert_color=data['image'][j].reshape(-1, 3))
 
@@ -744,7 +503,7 @@ if __name__ == '__main__':
             point_cloud.colors = o3d.utility.Vector3dVector(data['image'][j].reshape(-1, 3) / 255)
             point_cloud.points = o3d.utility.Vector3dVector(data['xyz_img'][j].reshape(-1, 3))
            
-            o3d.io.write_point_cloud(f"pc/{i}_{j}_colored_point_cloud.ply", point_cloud)
+            o3d.io.write_point_cloud(f"nerfvis/{i}_{j}_colored_point_cloud.ply", point_cloud)
 
     scene.export(f'nerfvis')
     page.save('nerfvis.html')

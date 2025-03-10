@@ -175,3 +175,6 @@ outputs*
 !requirements.txt
 video-dataset-disney
 data/
+*.json
+*.html
+nerfvis/

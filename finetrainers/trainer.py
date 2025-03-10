@@ -39,6 +39,7 @@ from .constants import (
     PRECOMPUTED_LATENTS_DIR_NAME,
 )
 from .dataset import BucketSampler, ImageOrVideoDatasetWithResizing, PrecomputedDataset
+from .bolt_dataset import MultiViewXYZDataset
 from .fake_dataset import FakeDataset
 from .hooks import apply_layerwise_upcasting
 from .models import get_config_from_model_name
@@ -114,23 +115,21 @@ class Trainer:
     def prepare_dataset(self) -> None:
         # TODO(aryan): Make a background process for fetching
         logger.info("Initializing dataset and dataloader")
-
-        if self.args.dataset_type == 'origin':
-            self.dataset = ImageOrVideoDatasetWithResizing(
-                data_root=self.args.data_root,
-                caption_column=self.args.caption_column,
-                video_column=self.args.video_column,
-                resolution_buckets=self.args.video_resolution_buckets,
-                dataset_file=self.args.dataset_file,
-                id_token=self.args.id_token,
-                remove_llm_prefixes=self.args.remove_common_llm_caption_prefixes,
+        if self.args.dataset_type == "bolt_rgbxyz":
+            assert len(self.args.video_resolution_buckets) == 1, "Bolt dataset only supports one resolution bucket"
+            num_frames, image_size, _ = self.args.video_resolution_buckets[0]
+            self.dataset = MultiViewXYZDataset(
+                dataset_name="xyz_dataset",
+                interval=1, image_size=image_size, view_num=num_frames,
+                file_name=f"infos_train_{self.state.accelerator.process_index}.json"  # will be replaced later
             )
-        elif self.args.dataset_type == 'fake':
-            self.dataset = FakeDataset()
+        else:
+            raise ValueError(f"Unknown dataset type: {self.args.dataset_type}")
+        
         self.dataloader = torch.utils.data.DataLoader(
             self.dataset,
-            batch_size=1,
-            sampler=BucketSampler(self.dataset, batch_size=self.args.batch_size, shuffle=True),
+            batch_size=self.args.batch_size,
+            # sampler=BucketSampler(self.dataset, batch_size=self.args.batch_size, shuffle=True),
             collate_fn=self.model_config.get("collate_fn"),
             num_workers=self.args.dataloader_num_workers,
             pin_memory=self.args.pin_memory,
@@ -636,18 +635,16 @@ class Trainer:
             models_to_accumulate = [self.transformer]
             epoch_loss = 0.0
             num_loss_updates = 0
-
+            
             for step, batch in enumerate(self.dataloader):
                 logger.debug(f"Starting step {step + 1}")
                 logs = {}
-
+                import pdb;pdb.set_trace()
                 with accelerator.accumulate(models_to_accumulate):
                     if not self.args.precompute_conditions:
-                        videos = batch["videos"]
-                        xyz_videos = batch["xyz_videos"]
-                        prompts = batch["prompts"]
+                        videos, xyz_videos, prompts = batch["videos"], batch["xyz_videos"], batch["prompts"]
                         batch_size = len(prompts)
-
+                        import pdb;pdb.set_trace()
                         if self.args.caption_dropout_technique == "empty":
                             if random.random() < self.args.caption_dropout_p:
                                 prompts = [""] * batch_size

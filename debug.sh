@@ -1,8 +1,8 @@
 #!/bin/bash
 export WANDB_MODE="offline"
-export NCCL_P2P_DISABLE=1
-export TORCH_NCCL_ENABLE_MONITORING=0
-export FINETRAINERS_LOG_LEVEL=DEBUG
+#export NCCL_P2P_DISABLE=1
+#export TORCH_NCCL_ENABLE_MONITORING=0
+#export FINETRAINERS_LOG_LEVEL=DEBUG
 
 
 DATA_ROOT="video-dataset-disney/videos"
@@ -20,10 +20,10 @@ dataset_cmd="--data_root $DATA_ROOT \
   --video_column $VIDEO_COLUMN \
   --caption_column $CAPTION_COLUMN \
   --id_token $ID_TOKEN \
-  --video_resolution_buckets 9x256x256 \
+  --video_resolution_buckets 21x256x256 \
   --caption_dropout_p 1 \
   --img_dropout_p 0.1 \
-  --dataset_type fake"
+  --dataset_type bolt_rgbxyz"
  
 
 # Dataloader arguments

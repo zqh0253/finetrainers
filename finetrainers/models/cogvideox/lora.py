@@ -1,11 +1,11 @@
 from typing import Any, Dict, List, Optional, Union
 
 import torch
+from torch.utils.data._utils.collate import default_collate
 from diffusers import AutoencoderKLCogVideoX, CogVideoXDDIMScheduler, CogVideoXPipeline
 from .cogvideox_transformer_3d import CogVideoXTransformer3DModel
 from PIL import Image
 from transformers import T5EncoderModel, T5Tokenizer
-
 from .utils import prepare_rotary_positional_embeddings
 
 
@@ -182,11 +182,10 @@ def post_latent_preparation(
 
 
 def collate_fn_t2v(batch: List[List[Dict[str, torch.Tensor]]]) -> Dict[str, torch.Tensor]:
-    return {
-        "prompts": [x["prompt"] for x in batch[0]],
-        "videos": torch.stack([x["video"] for x in batch[0]]),
-        "xyz_videos": torch.stack([x["xyz_img"] for x in batch[0]]),
-    }
+    processed_batch = default_collate(batch)
+    processed_batch['videos'] = processed_batch['videos'].float().div(255.0).mul(2.0).sub(1.0)
+    processed_batch['xyz_videos'] = processed_batch['xyz_videos'].float().div(255.0).mul(2.0).sub(1.0)
+    return processed_batch
 
 
 def calculate_noisy_latents(
