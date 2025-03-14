@@ -183,8 +183,8 @@ def post_latent_preparation(
 
 def collate_fn_t2v(batch: List[List[Dict[str, torch.Tensor]]]) -> Dict[str, torch.Tensor]:
     processed_batch = default_collate(batch)
-    processed_batch['videos'] = processed_batch['videos'].float().div(255.0).mul(2.0).sub(1.0)
-    processed_batch['xyz_videos'] = processed_batch['xyz_videos'].float().div(255.0).mul(2.0).sub(1.0)
+    processed_batch['videos'] = processed_batch['videos'].float().div(255.0).mul(2.0).sub(1.0).permute(0, 1, 4, 2, 3)
+    processed_batch['xyz_videos'] = processed_batch['xyz_videos'].float().div(255.0).mul(2.0).sub(1.0).permute(0, 1, 4, 2, 3)
     return processed_batch
 
 
@@ -205,6 +205,8 @@ def forward_pass(
     latents: torch.Tensor,
     noisy_latents: torch.Tensor,
     timesteps: torch.LongTensor,
+    num_real_frames: int,
+    grid_t: Optional[torch.Tensor] = None,
     ofs_emb: Optional[torch.Tensor] = None,
     **kwargs,
 ) -> torch.Tensor:
@@ -240,6 +242,8 @@ def forward_pass(
         ofs=ofs_emb,
         image_rotary_emb=image_rotary_emb,
         return_dict=False,
+        num_real_frames=num_real_frames,
+        grid_t=grid_t,
     )[0]
     # For CogVideoX, the transformer predicts the velocity. The denoised output is calculated by applying the same
     # code paths as scheduler.get_velocity(), which can be confusing to understand.

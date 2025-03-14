@@ -84,6 +84,7 @@ def get_3d_sincos_pos_embed(
     temporal_size: int,
     spatial_interpolation_scale: float = 1.0,
     temporal_interpolation_scale: float = 1.0,
+    grid_t: Optional[torch.Tensor] = None,
     device: Optional[torch.device] = None,
     output_type: str = "np",
 ) -> torch.Tensor:
@@ -134,9 +135,14 @@ def get_3d_sincos_pos_embed(
     pos_embed_spatial = get_2d_sincos_pos_embed_from_grid(embed_dim_spatial, grid, output_type="pt")
 
     # 2. Temporal
-    grid_t = torch.arange(temporal_size, device=device, dtype=torch.float32) / temporal_interpolation_scale
-    pos_embed_temporal = get_1d_sincos_pos_embed_from_grid(embed_dim_temporal, grid_t, output_type="pt")
+    if grid_t is None:
+        grid_t = torch.arange(temporal_size, device=device, dtype=torch.float32)
+    else:
+        temporal_size = grid_t.shape[0]
+    grid_t = grid_t / temporal_interpolation_scale
 
+    pos_embed_temporal = get_1d_sincos_pos_embed_from_grid(embed_dim_temporal, grid_t, output_type="pt")
+    
     # 3. Concat
     pos_embed_spatial = pos_embed_spatial[None, :, :]
     pos_embed_spatial = pos_embed_spatial.repeat_interleave(temporal_size, dim=0)  # [T, H*W, D // 4 * 3]
@@ -662,10 +668,17 @@ class CogVideoXPatchEmbed(nn.Module):
             self.proj = nn.Conv2d(
                 in_channels, embed_dim, kernel_size=(patch_size, patch_size), stride=patch_size, bias=bias
             )
+            self.xyz_proj = nn.Conv2d(
+                in_channels, embed_dim, kernel_size=(patch_size, patch_size), stride=patch_size, bias=bias
+            )
+            self.src_proj = nn.Conv2d(
+                in_channels, embed_dim, kernel_size=(patch_size, patch_size), stride=patch_size, bias=bias
+            )
         else:
             # CogVideoX 1.5 checkpoints
             self.proj = nn.Linear(in_channels * patch_size * patch_size * patch_size_t, embed_dim)
-
+            raise NotImplementedError("CogVideoX 1.5 is not yet supported.")
+        
         self.text_proj = nn.Linear(text_embed_dim, embed_dim)
 
         if use_positional_embeddings or use_learned_positional_embeddings:
@@ -674,7 +687,8 @@ class CogVideoXPatchEmbed(nn.Module):
             self.register_buffer("pos_embedding", pos_embedding, persistent=persistent)
 
     def _get_positional_embeddings(
-        self, sample_height: int, sample_width: int, sample_frames: int, device: Optional[torch.device] = None
+        self, sample_height: int, sample_width: int, sample_frames: int, device: Optional[torch.device] = None,
+        grid_t: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         post_patch_height = sample_height // self.patch_size
         post_patch_width = sample_width // self.patch_size
@@ -687,6 +701,7 @@ class CogVideoXPatchEmbed(nn.Module):
             post_time_compression_frames,
             self.spatial_interpolation_scale,
             self.temporal_interpolation_scale,
+            grid_t=grid_t,
             device=device,
             output_type="pt",
         )
@@ -694,7 +709,7 @@ class CogVideoXPatchEmbed(nn.Module):
 
         return pos_embedding
 
-    def forward(self, text_embeds: torch.Tensor, image_embeds: torch.Tensor, real_num_frames=3):
+    def forward(self, text_embeds: torch.Tensor, image_embeds: torch.Tensor, real_num_frames=3, grid_t=None):
         r"""
         Args:
             text_embeds (`torch.Tensor`):
@@ -705,30 +720,24 @@ class CogVideoXPatchEmbed(nn.Module):
         text_embeds = self.text_proj(text_embeds)
 
         batch_size, num_frames, channels, height, width = image_embeds.shape
-
         if self.patch_size_t is None:
-            image_embeds = image_embeds.reshape(-1, channels, height, width)
-            image_embeds = self.proj(image_embeds)
-            image_embeds = image_embeds.view(batch_size, num_frames, *image_embeds.shape[1:])
-            # rgb + xyz
-            image_embeds = image_embeds[:, :real_num_frames] + image_embeds[:, real_num_frames:2*real_num_frames] + image_embeds[:, 2*real_num_frames:]
+            rgb_embeds, xyz_embeds, src_embeds = image_embeds[:, :real_num_frames], image_embeds[:, real_num_frames:2*real_num_frames], image_embeds[:, 2*real_num_frames:]
+            rgb_embeds = self.proj(rgb_embeds.reshape(-1, channels, height, width)).view(
+                batch_size, -1, self.embed_dim, rgb_embeds.shape[3]//self.patch_size, rgb_embeds.shape[4]//self.patch_size)
+            xyz_embeds = self.xyz_proj(xyz_embeds.reshape(-1, channels, height, width)).view(
+                batch_size, -1, self.embed_dim, xyz_embeds.shape[3]//self.patch_size, xyz_embeds.shape[4]//self.patch_size)
+            src_embeds = self.src_proj(src_embeds.reshape(-1, channels, height, width)).view(
+                batch_size, -1, self.embed_dim, src_embeds.shape[3]//self.patch_size, src_embeds.shape[4]//self.patch_size)
+            image_embeds = torch.cat([(rgb_embeds + xyz_embeds) / 2, src_embeds], dim=1)
             image_embeds = image_embeds.flatten(3).transpose(2, 3)  # [batch, num_frames, height x width, channels]
             image_embeds = image_embeds.flatten(1, 2)  # [batch, num_frames x height x width, channels]
         else:
-            p = self.patch_size
-            p_t = self.patch_size_t
-
-            image_embeds = image_embeds.permute(0, 1, 3, 4, 2)
-            image_embeds = image_embeds.reshape(
-                batch_size, num_frames // p_t, p_t, height // p, p, width // p, p, channels
-            )
-            image_embeds = image_embeds.permute(0, 1, 3, 5, 7, 2, 4, 6).flatten(4, 7).flatten(1, 3)
-            image_embeds = self.proj(image_embeds)
+            raise NotImplementedError("CogVideoX 1.5 is not yet supported.")
 
         embeds = torch.cat(
             [text_embeds, image_embeds], dim=1
         ).contiguous()  # [batch, seq_length + num_frames x height x width, channels]
-
+        
         if self.use_positional_embeddings or self.use_learned_positional_embeddings:
             if self.use_learned_positional_embeddings and (self.sample_width != width or self.sample_height != height):
                 raise ValueError(
@@ -736,22 +745,27 @@ class CogVideoXPatchEmbed(nn.Module):
                     "If you think this is incorrect, please open an issue at https://github.com/huggingface/diffusers/issues."
                 )
 
-            pre_time_compression_frames = (real_num_frames - 1) * self.temporal_compression_ratio + 1
-
-            if (
-                self.sample_height != height
-                or self.sample_width != width
-                or self.sample_frames != pre_time_compression_frames
-            ):
-                pos_embedding = self._get_positional_embeddings(
-                    height, width, pre_time_compression_frames, device=embeds.device
-                )
+            if grid_t is None:
+                pre_time_compression_frames = (real_num_frames - 1) * self.temporal_compression_ratio + 1
+                if (
+                    self.sample_height != height
+                    or self.sample_width != width
+                    or self.sample_frames != pre_time_compression_frames
+                ):
+                    pos_embedding = self._get_positional_embeddings(
+                        height, width, pre_time_compression_frames, device=embeds.device
+                    )
+                else:
+                    pos_embedding = self.pos_embedding
+                pos_embedding = pos_embedding.to(dtype=embeds.dtype).flatten(0, 1).unsqueeze(0)
             else:
-                pos_embedding = self.pos_embedding
-
-            pos_embedding = pos_embedding.to(dtype=embeds.dtype).flatten(0, 1)
+                pos_embedding = torch.stack([
+                    self._get_positional_embeddings(height, width, real_num_frames, grid_t=grid_t[i], 
+                                                    device=embeds.device).to(dtype=embeds.dtype).flatten(0, 1)
+                    for i in range(batch_size)
+                ])
             joint_pos_embedding = pos_embedding.new_zeros(
-                1, self.max_text_seq_length + pos_embedding.shape[0], self.embed_dim, requires_grad=False
+                pos_embedding.shape[0], self.max_text_seq_length + pos_embedding.shape[1], self.embed_dim, requires_grad=False
             )
             joint_pos_embedding.data[:, self.max_text_seq_length :].copy_(pos_embedding)
             embeds = embeds + joint_pos_embedding
