@@ -12,6 +12,7 @@ import torch
 import torch.backends
 import transformers
 import wandb
+import time
 from accelerate import Accelerator, DistributedType
 from accelerate.logging import get_logger
 from accelerate.utils import (
@@ -65,6 +66,16 @@ from .utils.torch_utils import align_device_and_dtype, expand_tensor_dims, unwra
 logger = get_logger("finetrainers")
 logger.setLevel(FINETRAINERS_LOG_LEVEL)
 
+class Clock:
+    def __init__(self):
+        self.prev_time = time.time()
+
+    def tic(self):
+        torch.cuda.synchronize()
+        interval = time.time() - self.prev_time
+        self.prev_time = time.time()
+        return interval
+        
 
 class Trainer:
     def __init__(self, args: Args) -> None:
@@ -635,11 +646,13 @@ class Trainer:
             models_to_accumulate = [self.transformer]
             epoch_loss = 0.0
             num_loss_updates = 0
+
+            clock = Clock()
             
             for step, batch in enumerate(self.dataloader):
                 logger.debug(f"Starting step {step + 1}")
                 logs = {}
-                import pdb;pdb.set_trace()
+                data_time = clock.tic()
                 with accelerator.accumulate(models_to_accumulate):
                     if not self.args.precompute_conditions:
                         videos, xyz_videos, prompts = batch["videos"], batch["xyz_videos"], batch["prompts"]
@@ -773,6 +786,7 @@ class Trainer:
                         flow_weighting_scheme=self.args.flow_weighting_scheme,
                     )
                     weights = expand_tensor_dims(weights, noise.ndim)
+                    prepare_time = clock.tic()
 
                     pred = self.model_config["forward_pass"](
                         transformer=self.transformer,
@@ -784,6 +798,7 @@ class Trainer:
                     target = prepare_target(
                         scheduler=self.scheduler, noise=noise, latents=latent_conditions["latents"]
                     )
+                    forward_time = clock.tic()
 
                     loss = weights.float() * (pred["latents"].float() - target.float()).pow(2)
                     # mask out the src view.
@@ -812,6 +827,7 @@ class Trainer:
                     self.optimizer.step()
                     self.lr_scheduler.step()
                     self.optimizer.zero_grad()
+                    backward_time = clock.tic()
 
                 # Checks if the accelerator has performed an optimization step behind the scenes
                 if accelerator.sync_gradients:
@@ -839,13 +855,21 @@ class Trainer:
                 loss_item = loss.detach().item()
                 epoch_loss += loss_item
                 num_loss_updates += 1
+                other_time = clock.tic()
+                
                 logs["step_loss"] = loss_item
                 logs["lr"] = self.lr_scheduler.get_last_lr()[0]
+                logs["data_time"] = data_time
+                logs["prepare_time"] = prepare_time
+                logs["forward_time"] = forward_time
+                logs["backward_time"] = backward_time
+                logs["other_time"] = other_time
                 progress_bar.set_postfix(logs)
                 accelerator.log(logs, step=global_step)
 
                 if global_step >= self.state.train_steps:
                     break
+
 
             if num_loss_updates > 0:
                 epoch_loss /= num_loss_updates
