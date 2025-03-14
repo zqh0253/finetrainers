@@ -31,6 +31,7 @@ from diffusers.models.normalization import AdaLayerNorm, CogVideoXLayerNormZero
 
 import os
 import copy
+from einops import rearrange
 from huggingface_hub.utils import validate_hf_hub_args
 from diffusers.utils.hub_utils import (
     PushToHubMixin,
@@ -484,7 +485,8 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
         image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = True,
-        real_num_frames: int = 3
+        num_real_frames: int = 3,
+        grid_t: Optional[torch.Tensor] = None,
     ):
         if attention_kwargs is not None:
             attention_kwargs = attention_kwargs.copy()
@@ -501,8 +503,8 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
                     "Passing `scale` via `attention_kwargs` when not using the PEFT backend is ineffective."
                 )
 
-        batch_size, num_frames, channels, height, width = hidden_states.shape
-
+        batch_size, length, _, height, width = hidden_states.shape
+        
         # 1. Time embedding
         timesteps = timestep
         t_emb = self.time_proj(timesteps)
@@ -520,9 +522,9 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
             emb = emb + ofs_emb
 
         # 2. Patch embedding
-        hidden_states = self.patch_embed(encoder_hidden_states, hidden_states, real_num_frames)
+        hidden_states = self.patch_embed(encoder_hidden_states, hidden_states, num_real_frames, grid_t=grid_t)
         hidden_states = self.embedding_dropout(hidden_states)
-
+        imgg_seq_length = length - num_real_frames
         text_seq_length = encoder_hidden_states.shape[1]
         encoder_hidden_states = hidden_states[:, :text_seq_length]
         hidden_states = hidden_states[:, text_seq_length:]
@@ -574,16 +576,13 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
         p_t = self.config.patch_size_t
 
         if p_t is None:
-            output = hidden_states.reshape(batch_size, real_num_frames * 2, height // p, width // p, -1, p, p)
-            output = output.permute(0, 1, 4, 2, 5, 3, 6).flatten(5, 6).flatten(3, 4)
+            rgb, xyz = hidden_states.chunk(2, dim=-1)
+            rgb_output = rearrange(rgb, "b (t h w) (c m n) -> b t c (h m) (w n)", t=imgg_seq_length, m=p, n=p, w=height//p, h=width//p)
+            xyz_output = rearrange(xyz, "b (t h w) (c m n) -> b t c (h m) (w n)", t=imgg_seq_length, m=p, n=p, w=height//p, h=width//p)
+            output = torch.cat([rgb_output[:, :num_real_frames], xyz_output[:, :num_real_frames], 
+                                torch.zeros_like(rgb_output[:, num_real_frames:])], 1)
         else:
-            output = hidden_states.reshape(
-                batch_size, (real_num_frames+ p_t - 1) // p_t, height // p, width // p, -1, p_t, p, p
-            )
-            output = output.permute(0, 1, 5, 4, 2, 6, 3, 7).flatten(6, 7).flatten(4, 5).flatten(1, 2)
-
-        dumb = torch.zeros_like(output)[:, :1]
-        output = torch.cat([output, dumb], 1)
+            raise NotImplementedError("Patch size in temporal dimension is not supported yet.")
 
         if USE_PEFT_BACKEND:
             # remove `lora_scale` from each PEFT layer
@@ -1014,6 +1013,12 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
                     for name, param in state_dict.items():
                         if name in ['proj_out.weight', 'proj_out.bias']:
                             state_dict[name] = torch.cat([param] * 2, 0)
+                    if 'patch_embed.xyz_proj.weight' not in state_dict:
+                        state_dict['patch_embed.xyz_proj.weight'] = state_dict['patch_embed.proj.weight'] * 0
+                        state_dict['patch_embed.xyz_proj.bias'] = state_dict['patch_embed.proj.bias'] * 0
+                    if 'patch_embed.src_proj.weight' not in state_dict:
+                        state_dict['patch_embed.src_proj.weight'] = state_dict['patch_embed.proj.weight']
+                        state_dict['patch_embed.src_proj.bias'] = state_dict['patch_embed.proj.bias']
                     model._convert_deprecated_attention_blocks(state_dict)
 
                     # move the params from meta device to cpu

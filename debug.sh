@@ -33,7 +33,7 @@ dataloader_cmd="--dataloader_num_workers 4"
   # --precompute_conditions \
 training_cmd="--training_type  full-finetune\
   --seed 42 \
-  --batch_size 4 \
+  --batch_size 24 \
   --train_steps 10000 \
   --gradient_accumulation_steps 1 \
   --gradient_checkpointing \
@@ -63,7 +63,7 @@ miscellaneous_cmd="--tracker_name finetrainers-cog \
   --report_to wandb"
 
 # cmd="accelerate launch --config_file accelerate_configs/deepspeed.yaml --gpu_ids $GPU_IDS train.py \
-cmd="accelerate launch --config_file accelerate_configs/deepspeed_1.yaml  train.py \
+cmd="accelerate launch --config_file accelerate_configs/deepspeed_1.yaml --num_processes 8 train.py \
   $model_cmd \
   $dataset_cmd \
   $dataloader_cmd \

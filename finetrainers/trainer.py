@@ -30,7 +30,7 @@ from diffusers.utils import export_to_video, load_image, load_video
 from huggingface_hub import create_repo, upload_folder
 from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dict
 from tqdm import tqdm
-
+from einops import rearrange, repeat
 from .args import Args, validate_args
 from .constants import (
     FINETRAINERS_LOG_LEVEL,
@@ -121,7 +121,7 @@ class Trainer:
             self.dataset = MultiViewXYZDataset(
                 dataset_name="xyz_dataset",
                 interval=1, image_size=image_size, view_num=num_frames,
-                file_name=f"infos_train_{self.state.accelerator.process_index}.json"  # will be replaced later
+                file_name=f"infos_train_0.json"  # will be replaced later
             )
         else:
             raise ValueError(f"Unknown dataset type: {self.args.dataset_type}")
@@ -144,7 +144,7 @@ class Trainer:
             condition_components = self.model_config["load_condition_models"](**load_components_kwargs)
             latent_components = self.model_config["load_latent_models"](**load_components_kwargs)
             diffusion_components = self.model_config["load_diffusion_models"](**load_components_kwargs)
-
+        
         components = {}
         components.update(condition_components)
         components.update(latent_components)
@@ -639,17 +639,24 @@ class Trainer:
             for step, batch in enumerate(self.dataloader):
                 logger.debug(f"Starting step {step + 1}")
                 logs = {}
-                import pdb;pdb.set_trace()
                 with accelerator.accumulate(models_to_accumulate):
                     if not self.args.precompute_conditions:
                         videos, xyz_videos, prompts = batch["videos"], batch["xyz_videos"], batch["prompts"]
                         batch_size = len(prompts)
-                        import pdb;pdb.set_trace()
+                        num_real_frames = (videos.shape[1] - 1) // self.transformer_config.temporal_compression_ratio + 1
+                        
                         if self.args.caption_dropout_technique == "empty":
                             if random.random() < self.args.caption_dropout_p:
                                 prompts = [""] * batch_size
 
-                        src_videos = videos[:, 0:1]
+                        mask_idx = batch['mask_idx']
+                        assert mask_idx.size(1) == 1, "Only one src image is allowed."
+
+                        src_videos = torch.cat([videos, xyz_videos], 1).gather(
+                            1, repeat(mask_idx, 'b () -> b () c h w', 
+                                      c=videos.shape[2], h=videos.shape[3], w=videos.shape[4]))
+                        grid_t = repeat(torch.arange(0, num_real_frames, device=accelerator.device), 't->b t', b=batch_size)
+                        grid_t = torch.cat([grid_t.float(), mask_idx.float() / self.transformer_config.temporal_compression_ratio], 1)
 
                         if random.random() < self.args.img_dropout_p:
                             src_videos = src_videos * 0
@@ -680,9 +687,7 @@ class Trainer:
                             device=accelerator.device,
                             dtype=self.args.transformer_dtype,
                             generator=self.state.generator,
-                        )
-                        # latent_conditions, xyz_latent_conditions, src_latent_conditions 
-
+                        ) 
                         text_conditions = self.model_config["prepare_conditions"](
                             tokenizer=self.tokenizer,
                             text_encoder=self.text_encoder,
@@ -693,27 +698,11 @@ class Trainer:
                             dtype=self.args.transformer_dtype,
                         )
                     else:
-                        latent_conditions = batch["latent_conditions"]
-                        text_conditions = batch["text_conditions"]
-                        latent_conditions["latents"] = DiagonalGaussianDistribution(
-                            latent_conditions["latents"]
-                        ).sample(self.state.generator)
+                        raise NotImplementedError("Precomputation is not supported")
 
-                        # This method should only be called for precomputed latents.
-                        # TODO(aryan): rename this in separate PR
-                        latent_conditions = self.model_config["post_latent_preparation"](
-                            vae_config=self.vae_config,
-                            patch_size=self.transformer_config.patch_size,
-                            patch_size_t=self.transformer_config.patch_size_t,
-                            **latent_conditions,
-                        )
-                        align_device_and_dtype(latent_conditions, accelerator.device, self.args.transformer_dtype)
-                        align_device_and_dtype(text_conditions, accelerator.device, self.args.transformer_dtype)
-                        batch_size = latent_conditions["latents"].shape[0]
-
-                    latent_conditions["latents"] = torch.cat([latent_conditions["latents"], xyz_latent_conditions["latents"], src_latent_conditions["latents"]], 1)
+                    latent_conditions["latents"] = torch.cat([latent_conditions["latents"], xyz_latent_conditions["latents"]], 1)
                     latent_conditions = make_contiguous(latent_conditions)
-                    text_conditions = make_contiguous(text_conditions)
+                    text_conditions   = make_contiguous(text_conditions)
 
                     if self.args.caption_dropout_technique == "zero":
                         if random.random() < self.args.caption_dropout_p:
@@ -737,10 +726,6 @@ class Trainer:
                         generator=self.state.generator,
                     )
                     timesteps = (sigmas * 1000.0).long()
-                    
-                    mask = torch.zeros_like(latent_conditions["latents"])
-                    mask[:, -1] = 1
-
                     noise = torch.randn(
                         latent_conditions["latents"].shape,
                         generator=self.state.generator,
@@ -762,10 +747,11 @@ class Trainer:
                         # Default to flow-matching noise addition
                         noisy_latents = (1.0 - sigmas) * latent_conditions["latents"] + sigmas * noise
                         noisy_latents = noisy_latents.to(latent_conditions["latents"].dtype)
-                    noisy_latents = noisy_latents * (1-mask) + latent_conditions["latents"] * mask
-
-                    latent_conditions.update({"noisy_latents": noisy_latents})
-
+                        
+                    # append src_latents
+                    noisy_latents = torch.cat([noisy_latents, src_latent_conditions["latents"]], 1)
+                    latents = torch.cat([latent_conditions["latents"], src_latent_conditions["latents"]], 1)    
+                    latent_conditions.update({"noisy_latents": noisy_latents, "latents": latents})
                     weights = prepare_loss_weights(
                         scheduler=self.scheduler,
                         alphas=scheduler_alphas[timesteps] if scheduler_alphas is not None else None,
@@ -778,6 +764,8 @@ class Trainer:
                         transformer=self.transformer,
                         scheduler=self.scheduler,
                         timesteps=timesteps,
+                        num_real_frames=num_real_frames,
+                        grid_t=grid_t,
                         **latent_conditions,
                         **text_conditions,
                     )
@@ -786,8 +774,8 @@ class Trainer:
                     )
 
                     loss = weights.float() * (pred["latents"].float() - target.float()).pow(2)
-                    # mask out the src view.
-                    loss = loss * (1 - mask)
+                    loss = loss[:, :num_real_frames * 2]  # only compute loss for noisy frames
+    
                     # Average loss across all but batch dimension
                     loss = loss.mean(list(range(1, loss.ndim)))
                     # Average loss across batch dimension
