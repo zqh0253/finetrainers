@@ -178,3 +178,4 @@ data/
 *.json
 *.html
 nerfvis/
+debug_ckpt/

@@ -1012,7 +1012,8 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
                     )
                     for name, param in state_dict.items():
                         if name in ['proj_out.weight', 'proj_out.bias']:
-                            state_dict[name] = torch.cat([param] * 2, 0)
+                            if model.state_dict()['proj_out.weight'].shape[0] == state_dict['proj_out.weight'].shape[0] * 2:
+                                state_dict[name] = torch.cat([param] * 2, 0)
                     if 'patch_embed.xyz_proj.weight' not in state_dict:
                         state_dict['patch_embed.xyz_proj.weight'] = state_dict['patch_embed.proj.weight'] * 0
                         state_dict['patch_embed.xyz_proj.bias'] = state_dict['patch_embed.proj.bias'] * 0

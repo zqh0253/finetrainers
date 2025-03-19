@@ -250,11 +250,11 @@ class MultiViewXYZDataset(Dataset):
             }
         )
         transfer_config = TransferConfig(
-            max_concurrency=10,  # Number of threads to use for the transfer
+            # max_concurrency=10,  # Number of threads to use for the transfer
             use_threads=True,     # Set to False to disable threading
             multipart_chunksize=8 * 1024 * 1024,  
             multipart_threshold=8 * 1024 * 1024,
-            max_bandwidth = 50 * 1024 * 1024
+            # max_bandwidth = 50 * 1024 * 1024
         )
         session = boto3.Session(profile_name="conductor-notary")
         conductor_endpoint = "https://conductor.data.apple.com"

@@ -27,21 +27,22 @@ dataset_cmd="--data_root $DATA_ROOT \
  
 
 # Dataloader arguments
-dataloader_cmd="--dataloader_num_workers 4"
+dataloader_cmd="--dataloader_num_workers 6"
 
 # Training arguments
   # --precompute_conditions \
 training_cmd="--training_type  full-finetune\
   --seed 42 \
-  --batch_size 24 \
+  --batch_size 4 \
   --train_steps 10000 \
-  --gradient_accumulation_steps 1 \
-  --gradient_checkpointing \
+  --gradient_accumulation_steps 4 \
   --checkpointing_steps 500 \
   --checkpointing_limit 6 \
   --resume_from_checkpoint=latest \
   --enable_slicing \
   --enable_tiling"
+
+#   --gradient_checkpointing \
 
 # Optimizer arguments
 optimizer_cmd="--optimizer adamw \
