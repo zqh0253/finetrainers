@@ -171,6 +171,7 @@ dump*
 outputs*
 *.slurm
 .vscode/
+*dummy*
 
 !requirements.txt
 video-dataset-disney

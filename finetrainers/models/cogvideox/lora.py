@@ -9,6 +9,7 @@ from transformers import T5EncoderModel, T5Tokenizer
 from .utils import prepare_rotary_positional_embeddings
 
 
+
 def load_condition_models(
     model_id: str = "THUDM/CogVideoX-5b",
     text_encoder_dtype: torch.dtype = torch.bfloat16,
